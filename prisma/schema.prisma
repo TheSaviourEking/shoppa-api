@@ -1,0 +1,325 @@
+// Shoppa — data model for Page 3 scope.
+//
+// Guiding decisions:
+// - Monetary amounts are Decimal(14,2) (Naira; up to ~1e12 kobo).
+// - Phone numbers are stored in E.164 form so lookups by email-or-phone
+//   can hit a canonical shape.
+// - Enums are declared at the schema level so Postgres enforces
+//   legal values, not just the application layer.
+// - The Conversation triple (buyerId, shopperId, postId) is unique so
+//   opening a chat about an existing request is idempotent.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────
+
+enum UserGoal {
+  BUY
+  EARN
+}
+
+enum PostStatus {
+  POSTED
+  IN_PROGRESS
+  PAID
+  CANCELLED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+}
+
+enum TransactionType {
+  TOPUP
+  DEBIT
+  CREDIT
+  REFUND
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum FeedbackKind {
+  FEEDBACK
+  REPORT
+}
+
+// ─── Users & Auth ─────────────────────────────────────────────────────
+
+model User {
+  id                    String   @id @default(cuid())
+  firstName             String   @db.VarChar(100)
+  lastName              String   @db.VarChar(100)
+  email                 String   @unique @db.VarChar(255)
+  phone                 String   @unique @db.VarChar(20) // E.164
+  passwordHash          String   @db.VarChar(255)
+  avatarKey             String?  @db.VarChar(255)
+  goal                  UserGoal @default(BUY)
+  notificationsEnabled  Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  wallet                Wallet?
+  refreshTokens         RefreshToken[]
+  passwordResets        PasswordReset[]
+  addresses             Address[]
+  posts                 Post[]              @relation("PostBuyer")
+  shopperPosts          Post[]              @relation("PostShopper")
+  buyerConversations    Conversation[]     @relation("ConversationBuyer")
+  shopperConversations  Conversation[]     @relation("ConversationShopper")
+  sentMessages          Message[]
+  blocksInitiated       Block[]             @relation("BlockInitiator")
+  blocksReceived        Block[]             @relation("BlockedUser")
+  uploads               Upload[]
+  feedback              Feedback[]
+  counterpartyTxns      Transaction[]      @relation("TransactionCounterparty")
+
+  @@index([email])
+  @@index([phone])
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique @db.VarChar(255)
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model PasswordReset {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique @db.VarChar(255)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_resets")
+}
+
+// ─── Catalog ──────────────────────────────────────────────────────────
+
+model Category {
+  id         String @id @default(cuid())
+  name       String @unique @db.VarChar(100)
+  iconKey    String @db.VarChar(100)
+  sortOrder  Int    @default(0)
+
+  posts      Post[]
+
+  @@map("categories")
+}
+
+// ─── Addresses ────────────────────────────────────────────────────────
+
+model Address {
+  id         String   @id @default(cuid())
+  userId     String
+  label      String?  @db.VarChar(100)
+  line       String   @db.VarChar(255)
+  city       String   @db.VarChar(100)
+  state      String   @db.VarChar(100)
+  country    String   @db.VarChar(100)
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postsForDelivery  Post[]
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+// ─── Posts (shopping requests) ────────────────────────────────────────
+
+model Post {
+  id                 String      @id @default(cuid())
+  userId             String
+  shopperId          String?
+  categoryId         String
+  deliveryAddressId  String
+  note               String?     @db.Text
+  budget             Decimal     @db.Decimal(14, 2)
+  installmentsCount  Int         @default(1)
+  status             PostStatus  @default(POSTED)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  buyer              User         @relation("PostBuyer", fields: [userId], references: [id], onDelete: Cascade)
+  shopper            User?        @relation("PostShopper", fields: [shopperId], references: [id])
+  category           Category     @relation(fields: [categoryId], references: [id])
+  deliveryAddress    Address      @relation(fields: [deliveryAddressId], references: [id])
+  items              PostItem[]
+  conversations      Conversation[]
+  transactions       Transaction[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([categoryId])
+  @@map("posts")
+}
+
+model PostItem {
+  id      String @id @default(cuid())
+  postId  String
+  name    String @db.VarChar(255)
+  qty     Int    @default(1)
+
+  post    Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@map("post_items")
+}
+
+// ─── Messaging ────────────────────────────────────────────────────────
+
+model Conversation {
+  id                  String    @id @default(cuid())
+  buyerId             String
+  shopperId           String
+  postId              String
+  lastMessageAt       DateTime  @default(now())
+  hiddenFromBuyer     Boolean   @default(false)
+  hiddenFromShopper   Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+
+  buyer     User      @relation("ConversationBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  shopper   User      @relation("ConversationShopper", fields: [shopperId], references: [id], onDelete: Cascade)
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@unique([buyerId, shopperId, postId])
+  @@index([buyerId])
+  @@index([shopperId])
+  @@index([postId])
+  @@map("conversations")
+}
+
+model Message {
+  id              String       @id @default(cuid())
+  conversationId  String
+  senderId        String
+  body            String?      @db.Text
+  type            MessageType  @default(TEXT)
+  readAt          DateTime?
+  createdAt       DateTime     @default(now())
+
+  conversation  Conversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender        User                 @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  attachments   MessageAttachment[]
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model MessageAttachment {
+  id         String @id @default(cuid())
+  messageId  String
+  uploadId   String
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  upload    Upload   @relation(fields: [uploadId], references: [id])
+
+  @@index([messageId])
+  @@map("message_attachments")
+}
+
+model Block {
+  blockerId  String
+  blockedId  String
+  createdAt  DateTime @default(now())
+
+  blocker   User  @relation("BlockInitiator", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User  @relation("BlockedUser",   fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
+  @@map("blocks")
+}
+
+// ─── Wallet & Transactions ────────────────────────────────────────────
+
+model Wallet {
+  id                      String   @id @default(cuid())
+  userId                  String   @unique
+  balance                 Decimal  @default(0) @db.Decimal(14, 2)
+  virtualAccountProvider  String   @default("Opay") @db.VarChar(50)
+  virtualAccountNumber    String   @unique @db.VarChar(20)
+  createdAt               DateTime @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions  Transaction[]
+
+  @@map("wallets")
+}
+
+model Transaction {
+  id                  String             @id @default(cuid())
+  walletId            String
+  type                TransactionType
+  amount              Decimal            @db.Decimal(14, 2)
+  description         String             @db.VarChar(255)
+  postId              String?
+  counterpartyUserId  String?
+  status              TransactionStatus  @default(SUCCESS)
+  createdAt           DateTime           @default(now())
+
+  wallet         Wallet  @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  post           Post?   @relation(fields: [postId], references: [id])
+  counterparty   User?   @relation("TransactionCounterparty", fields: [counterpartyUserId], references: [id])
+
+  @@index([walletId, createdAt])
+  @@map("transactions")
+}
+
+// ─── Uploads & Feedback ───────────────────────────────────────────────
+
+model Upload {
+  id          String   @id @default(cuid())
+  userId      String
+  key         String   @unique @db.VarChar(255)
+  url         String   @db.VarChar(500)
+  mime        String   @db.VarChar(100)
+  sizeBytes   Int
+  createdAt   DateTime @default(now())
+
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attachments   MessageAttachment[]
+
+  @@index([userId])
+  @@map("uploads")
+}
+
+model Feedback {
+  id         String       @id @default(cuid())
+  userId     String
+  kind       FeedbackKind @default(FEEDBACK)
+  body       String       @db.Text
+  createdAt  DateTime     @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("feedback")
+}
