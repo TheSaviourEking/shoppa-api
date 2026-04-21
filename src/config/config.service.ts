@@ -25,6 +25,17 @@ export class AppConfigService {
     return env.REDIS_URL;
   }
 
+  get apiPrefix(): string {
+    return env.API_PREFIX;
+  }
+
+  get corsOrigins(): string[] | true {
+    if (!env.CORS_ORIGINS) return true;
+    return env.CORS_ORIGINS.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
   get isProduction(): boolean {
     return env.NODE_ENV === 'production';
   }
