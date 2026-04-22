@@ -1,5 +1,8 @@
 # Shoppa Backend
 
+[![CI](https://github.com/TheSaviourEking/shoppa-api/actions/workflows/ci.yml/badge.svg)](https://github.com/TheSaviourEking/shoppa-api/actions/workflows/ci.yml)
+
+
 NestJS + TypeScript REST API for the **Shoppa** shopping-request app.
 Three-day engineering assessment — **Page 3** scope (Saviour Eking).
 
