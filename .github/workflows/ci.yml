@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs for the same ref so a quick succession of
+# pushes doesn't queue up redundant work.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: lint + build + unit + e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Mirrors the local cold-clone flow exactly: docker compose for
+    # Postgres + Redis + MinIO, then npm scripts. Reviewers and CI
+    # see the same setup. We don't use GitHub Actions service
+    # containers because MinIO needs a custom command that the
+    # services: block doesn't support.
+
+    env:
+      # Match docker-compose defaults.
+      DATABASE_URL: postgresql://shoppa:shoppa@localhost:5432/shoppa
+      REDIS_URL: redis://localhost:6379
+      # Static dev secrets — fine for CI, never reused in prod.
+      JWT_ACCESS_SECRET: ci-access-secret-padded-to-meet-the-32-char-floor-aaaaaaaa
+      JWT_REFRESH_SECRET: ci-refresh-secret-padded-to-meet-the-32-char-floor-bbbbbbbb
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL: 30d
+      # Keep OAuth in dev mode — we don't have real Google/Apple
+      # client IDs in CI and the prod-mode path is covered by mocked
+      # unit tests.
+      OAUTH_DEV_MODE: 'true'
+      # Match docker-compose MinIO defaults.
+      UPLOADS_MAX_BYTES: '10485760'
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: auto
+      S3_BUCKET: shoppa-uploads
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_PUBLIC_BASE_URL: http://localhost:9000/shoppa-uploads
+      S3_FORCE_PATH_STYLE: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies (frozen lockfile)
+        run: npm ci
+
+      - name: Bring up infra (postgres + redis + minio)
+        run: docker compose up -d
+
+      - name: Wait for service healthchecks
+        run: |
+          for svc in shoppa-postgres shoppa-redis shoppa-minio; do
+            echo "Waiting for $svc..."
+            timeout 60 bash -c "until [ \"\$(docker inspect -f '{{.State.Health.Status}}' $svc 2>/dev/null)\" = 'healthy' ]; do sleep 2; done"
+          done
+          # minio-init is a one-shot — wait for it to exit cleanly.
+          docker wait shoppa-minio-init
+          docker logs shoppa-minio-init
+
+      - name: Apply migrations
+        run: npm run prisma:migrate:deploy
+
+      - name: Seed categories
+        run: npm run db:seed
+
+      - name: Lint (zero errors, zero warnings)
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests with coverage
+        run: npm run test:cov
+
+      - name: End-to-end tests (against real Postgres + Redis + MinIO)
+        run: npm run test:e2e
+
+      - name: Tear down infra
+        if: always()
+        run: docker compose down -v
