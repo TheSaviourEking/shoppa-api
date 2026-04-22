@@ -4,6 +4,7 @@ import { AppConfigModule } from './config/config.module';
 import { AddressesModule } from './modules/addresses/addresses.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { PostsModule } from './modules/posts/posts.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
@@ -18,6 +19,7 @@ import { RedisModule } from './redis/redis.module';
     AuthModule,
     UploadsModule,
     AddressesModule,
+    PostsModule,
   ],
   controllers: [],
   providers: [],
