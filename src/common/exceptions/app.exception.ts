@@ -1,5 +1,6 @@
 import { HttpException } from '@nestjs/common';
-import { ErrorCode, ErrorStatus } from './error-codes';
+import type { ErrorCode } from './error-codes';
+import { ErrorStatus } from './error-codes';
 
 /**
  * Domain-level exception with a canonical error code.

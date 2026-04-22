@@ -13,13 +13,8 @@ import type { ApiResponseSuccess } from '../dto/api-response.dto';
  * handled by HttpExceptionFilter.
  */
 @Injectable()
-export class ResponseEnvelopeInterceptor<T>
-  implements NestInterceptor<T, ApiResponseSuccess<T>>
-{
-  intercept(
-    _context: ExecutionContext,
-    next: CallHandler<T>,
-  ): Observable<ApiResponseSuccess<T>> {
+export class ResponseEnvelopeInterceptor<T> implements NestInterceptor<T, ApiResponseSuccess<T>> {
+  intercept(_context: ExecutionContext, next: CallHandler<T>): Observable<ApiResponseSuccess<T>> {
     return next.handle().pipe(map((data) => ({ success: true, data })));
   }
 }
