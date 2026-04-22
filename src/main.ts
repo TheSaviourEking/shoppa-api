@@ -1,7 +1,9 @@
 import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import express from 'express';
 import helmet from 'helmet';
+import { resolve } from 'node:path';
 import { AppModule } from './app.module';
 import { env } from './config/env';
 
@@ -31,6 +33,12 @@ async function bootstrap(): Promise<void> {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
+
+  // Static-serve uploaded files at their public base URL (default
+  // /uploads). Mounted before the global prefix is applied so the URL
+  // we hand back to clients (e.g. /uploads/2026/04/22/<id>.jpg)
+  // resolves at the root path, not under the API version.
+  app.use(env.UPLOADS_PUBLIC_BASE_URL, express.static(resolve(env.UPLOADS_DIR)));
 
   // Route versioning. Health is excluded so infrastructure probes
   // can keep hitting /health regardless of API version bumps.

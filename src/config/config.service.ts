@@ -56,6 +56,18 @@ export class AppConfigService {
     return env.OAUTH_DEV_MODE;
   }
 
+  get uploadsDir(): string {
+    return env.UPLOADS_DIR;
+  }
+
+  get uploadsMaxBytes(): number {
+    return env.UPLOADS_MAX_BYTES;
+  }
+
+  get uploadsPublicBaseUrl(): string {
+    return env.UPLOADS_PUBLIC_BASE_URL;
+  }
+
   get isProduction(): boolean {
     return env.NODE_ENV === 'production';
   }

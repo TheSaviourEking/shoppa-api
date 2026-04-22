@@ -24,6 +24,16 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+
+  // Uploads — local-disk storage for the assessment build. README
+  // documents the production target (S3 or equivalent).
+  UPLOADS_DIR: z.string().default('./uploads'),
+  UPLOADS_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10 * 1024 * 1024),
+  UPLOADS_PUBLIC_BASE_URL: z.string().default('/uploads'),
 });
 
 export type Env = z.infer<typeof envSchema>;

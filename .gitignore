@@ -43,8 +43,9 @@ Thumbs.db
 prisma/*.db
 prisma/*.db-journal
 
-# Upload storage (dev)
-uploads/
+# Upload storage (dev) — only the runtime directory at the repo root,
+# not the src/modules/uploads code module.
+/uploads/
 
 # Husky
 .husky/_/
