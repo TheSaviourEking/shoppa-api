@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { randomBytes } from 'node:crypto';
-import { promises as fs } from 'node:fs';
-import { join } from 'node:path';
 import { AppException } from '../../common/exceptions/app.exception';
 import { ErrorCode } from '../../common/exceptions/error-codes';
 import { AppConfigService } from '../../config/config.service';
@@ -27,6 +26,10 @@ export interface PersistedUpload {
 
 @Injectable()
 export class UploadsService {
+  // Lazily constructed so test runs that never touch the upload path
+  // don't pay the cost of building an S3 client.
+  private s3?: S3Client;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
@@ -50,13 +53,18 @@ export class UploadsService {
     }
 
     const key = this.makeKey(file.mimetype);
-    const absolutePath = join(this.config.uploadsDir, key);
 
-    await fs.mkdir(join(absolutePath, '..'), { recursive: true });
-    await fs.writeFile(absolutePath, file.buffer);
+    await this.client().send(
+      new PutObjectCommand({
+        Bucket: this.config.s3Bucket,
+        Key: key,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        ContentLength: file.size,
+      }),
+    );
 
-    const url = `${this.config.uploadsPublicBaseUrl}/${key}`;
-
+    const url = `${this.config.s3PublicBaseUrl}/${key}`;
     const row = await this.prisma.upload.create({
       data: {
         userId,
@@ -70,16 +78,17 @@ export class UploadsService {
     return { id: row.id, key, url, mime: file.mimetype, sizeBytes: file.size };
   }
 
-  /**
-   * Path-on-disk for a given key. Used by the static-serving route to
-   * read a file back. Throws on directory traversal so a crafted key
-   * (`../../etc/passwd`) cannot escape the uploads root.
-   */
-  resolveDiskPath(key: string): string {
-    if (key.includes('..') || key.startsWith('/')) {
-      throw new AppException(ErrorCode.NOT_FOUND, 'Upload not found');
-    }
-    return join(this.config.uploadsDir, key);
+  private client(): S3Client {
+    this.s3 ??= new S3Client({
+      endpoint: this.config.s3Endpoint,
+      region: this.config.s3Region,
+      forcePathStyle: this.config.s3ForcePathStyle,
+      credentials: {
+        accessKeyId: this.config.s3AccessKeyId,
+        secretAccessKey: this.config.s3SecretAccessKey,
+      },
+    });
+    return this.s3;
   }
 
   private makeKey(mime: string): string {

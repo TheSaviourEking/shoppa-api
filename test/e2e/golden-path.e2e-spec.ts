@@ -120,11 +120,18 @@ describe('Golden path (buyer flow)', () => {
       .attach('file', pixel, { filename: 'pixel.png', contentType: 'image/png' })
       .expect(201);
     expect(res.body.data.mime).toBe('image/png');
-    expect(res.body.data.url).toMatch(/^\/uploads\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]+\.png$/);
+    expect(res.body.data.url).toMatch(
+      /^https?:\/\/[^/]+\/[^/]+\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]+\.png$/,
+    );
     uploadId = res.body.data.id;
 
-    // The URL should round-trip through the static-serve route.
-    await request(server).get(res.body.data.url).expect(200);
+    // The URL is served by MinIO directly (or R2 in prod). Hit it via
+    // global fetch to prove the bytes actually landed in the bucket.
+    const fetched = await fetch(res.body.data.url);
+    expect(fetched.status).toBe(200);
+    expect(fetched.headers.get('content-type')).toBe('image/png');
+    const fetchedBytes = Buffer.from(await fetched.arrayBuffer());
+    expect(fetchedBytes.equals(pixel)).toBe(true);
   });
 
   // ─── Address ────────────────────────────────────────────────────────

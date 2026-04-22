@@ -10,7 +10,11 @@ services:
     ports:
       - '${POSTGRES_PORT:-5432}:5432'
     volumes:
-      - shoppa-postgres-data:/var/lib/postgresql/data
+      # Postgres 18+ stores data under a major-version subdirectory
+      # (/var/lib/postgresql/18/docker). Mounting the parent keeps the
+      # layout intact and works for future major-version bumps via
+      # pg_upgrade --link.
+      - shoppa-postgres-data:/var/lib/postgresql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-shoppa} -d ${POSTGRES_DB:-shoppa}']
       interval: 5s
@@ -32,6 +36,47 @@ services:
       timeout: 5s
       retries: 10
 
+  # S3-compatible object storage. Production swaps the env vars to
+  # point at Cloudflare R2 (or any S3-compatible service) — no code
+  # change. The bucket is created and made public-read by minio-init
+  # below so URLs round-trip without signed-URL plumbing.
+  minio:
+    image: minio/minio:latest
+    container_name: shoppa-minio
+    restart: unless-stopped
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - '${MINIO_PORT:-9000}:9000' # S3 API
+      - '${MINIO_CONSOLE_PORT:-9001}:9001' # Web console
+    volumes:
+      - shoppa-minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: shoppa-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY_ID:-minioadmin} ${S3_SECRET_ACCESS_KEY:-minioadmin} &&
+      mc mb --ignore-existing local/${S3_BUCKET:-shoppa-uploads} &&
+      mc anonymous set public local/${S3_BUCKET:-shoppa-uploads} &&
+      echo 'shoppa-uploads bucket ready'
+      "
+
 volumes:
   shoppa-postgres-data:
+    name: shoppa-postgres-data
   shoppa-redis-data:
+    name: shoppa-redis-data
+  shoppa-minio-data:
+    name: shoppa-minio-data

@@ -64,16 +64,36 @@ export class AppConfigService {
     return env.APPLE_OAUTH_AUDIENCE;
   }
 
-  get uploadsDir(): string {
-    return env.UPLOADS_DIR;
-  }
-
   get uploadsMaxBytes(): number {
     return env.UPLOADS_MAX_BYTES;
   }
 
-  get uploadsPublicBaseUrl(): string {
-    return env.UPLOADS_PUBLIC_BASE_URL;
+  get s3Endpoint(): string {
+    return env.S3_ENDPOINT;
+  }
+
+  get s3Region(): string {
+    return env.S3_REGION;
+  }
+
+  get s3Bucket(): string {
+    return env.S3_BUCKET;
+  }
+
+  get s3AccessKeyId(): string {
+    return env.S3_ACCESS_KEY_ID;
+  }
+
+  get s3SecretAccessKey(): string {
+    return env.S3_SECRET_ACCESS_KEY;
+  }
+
+  get s3PublicBaseUrl(): string {
+    return env.S3_PUBLIC_BASE_URL;
+  }
+
+  get s3ForcePathStyle(): boolean {
+    return env.S3_FORCE_PATH_STYLE;
   }
 
   get isProduction(): boolean {

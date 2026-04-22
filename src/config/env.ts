@@ -33,15 +33,25 @@ const envSchema = z
     GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
     APPLE_OAUTH_AUDIENCE: z.string().optional(),
 
-    // Uploads — local-disk storage for the assessment build. README
-    // documents the production target (S3 or equivalent).
-    UPLOADS_DIR: z.string().default('./uploads'),
+    // Uploads — bytes go to an S3-compatible service. Defaults point
+    // at the MinIO container in docker-compose; production overrides
+    // the endpoint + credentials to hit Cloudflare R2 (or equivalent)
+    // without any code change.
     UPLOADS_MAX_BYTES: z.coerce
       .number()
       .int()
       .positive()
       .default(10 * 1024 * 1024),
-    UPLOADS_PUBLIC_BASE_URL: z.string().default('/uploads'),
+    S3_ENDPOINT: z.string().url().default('http://localhost:9000'),
+    S3_REGION: z.string().default('auto'),
+    S3_BUCKET: z.string().default('shoppa-uploads'),
+    S3_ACCESS_KEY_ID: z.string().default('minioadmin'),
+    S3_SECRET_ACCESS_KEY: z.string().default('minioadmin'),
+    S3_PUBLIC_BASE_URL: z.string().default('http://localhost:9000/shoppa-uploads'),
+    S3_FORCE_PATH_STYLE: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((v) => v === 'true'),
   })
   .superRefine((val, ctx) => {
     if (!val.OAUTH_DEV_MODE) {
