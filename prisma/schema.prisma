@@ -187,12 +187,16 @@ model Post {
 }
 
 model PostItem {
-  id      String @id @default(cuid())
-  postId  String
-  name    String @db.VarChar(255)
-  qty     Int    @default(1)
+  id        String  @id @default(cuid())
+  postId    String
+  name      String  @db.VarChar(255)
+  // Optional reference to an upload (the "Add item image (optional)"
+  // affordance on the Add Item modal). Stored as the upload key
+  // rather than a foreign key so deleting an item never cascades into
+  // shared upload rows.
+  imageKey  String? @db.VarChar(255)
 
-  post    Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post      Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId])
   @@map("post_items")
