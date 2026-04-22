@@ -4,6 +4,7 @@ import { AppConfigModule } from './config/config.module';
 import { AddressesModule } from './modules/addresses/addresses.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
+import { FeedbackModule } from './modules/feedback/feedback.module';
 import { HealthModule } from './modules/health/health.module';
 import { MeModule } from './modules/me/me.module';
 import { PostsModule } from './modules/posts/posts.module';
@@ -26,6 +27,7 @@ import { RedisModule } from './redis/redis.module';
     ConversationsModule,
     WalletModule,
     MeModule,
+    FeedbackModule,
   ],
   controllers: [],
   providers: [],
