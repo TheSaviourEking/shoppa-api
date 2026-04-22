@@ -56,6 +56,14 @@ export class AppConfigService {
     return env.OAUTH_DEV_MODE;
   }
 
+  get googleOAuthClientId(): string | undefined {
+    return env.GOOGLE_OAUTH_CLIENT_ID;
+  }
+
+  get appleOAuthAudience(): string | undefined {
+    return env.APPLE_OAUTH_AUDIENCE;
+  }
+
   get uploadsDir(): string {
     return env.UPLOADS_DIR;
   }

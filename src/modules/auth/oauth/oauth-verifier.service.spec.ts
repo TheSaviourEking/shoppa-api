@@ -1,7 +1,18 @@
+import { OAuth2Client } from 'google-auth-library';
+import { jwtVerify } from 'jose';
 import * as jwt from 'jsonwebtoken';
 import { ErrorCode } from '../../../common/exceptions/error-codes';
 import type { AppConfigService } from '../../../config/config.service';
 import { OAuthVerifierService } from './oauth-verifier.service';
+
+jest.mock('google-auth-library');
+// Full replacement — jose is ESM-only and Jest can't `requireActual`
+// it without ESM transform config. The service only uses these two
+// exports so a full mock is sufficient.
+jest.mock('jose', () => ({
+  createRemoteJWKSet: jest.fn(() => () => Promise.resolve('fake-key')),
+  jwtVerify: jest.fn(),
+}));
 
 const fakeIdToken = (
   payload: Record<string, unknown>,
@@ -9,6 +20,10 @@ const fakeIdToken = (
 ): string => jwt.sign(payload, secret);
 
 describe('OAuthVerifierService', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   describe('dev mode', () => {
     const config = { oauthDevMode: true } as unknown as AppConfigService;
     const service = new OAuthVerifierService(config);
@@ -66,12 +81,86 @@ describe('OAuthVerifierService', () => {
     });
   });
 
-  describe('production mode', () => {
-    it('refuses verification without configured providers', async () => {
-      const config = { oauthDevMode: false } as unknown as AppConfigService;
-      const service = new OAuthVerifierService(config);
+  describe('production mode — Google', () => {
+    const config = {
+      oauthDevMode: false,
+      googleOAuthClientId: 'test-google-client.apps.googleusercontent.com',
+      appleOAuthAudience: 'app.shoppa',
+    } as unknown as AppConfigService;
 
-      await expect(service.verifyGoogle(fakeIdToken({ sub: 'x' }))).rejects.toMatchObject({
+    it('returns the verified identity when google-auth-library accepts the token', async () => {
+      const verifyIdToken = jest.fn().mockResolvedValue({
+        getPayload: () => ({
+          sub: 'google-prod-1',
+          email: 'live@example.com',
+          email_verified: true,
+          given_name: 'Live',
+          family_name: 'User',
+        }),
+      });
+      (OAuth2Client as jest.MockedClass<typeof OAuth2Client>).mockImplementation(
+        () => ({ verifyIdToken }) as unknown as OAuth2Client,
+      );
+
+      const service = new OAuthVerifierService(config);
+      const identity = await service.verifyGoogle('real-id-token');
+
+      expect(verifyIdToken).toHaveBeenCalledWith({
+        idToken: 'real-id-token',
+        audience: 'test-google-client.apps.googleusercontent.com',
+      });
+      expect(identity.provider).toBe('google');
+      expect(identity.providerUserId).toBe('google-prod-1');
+      expect(identity.email).toBe('live@example.com');
+    });
+
+    it('throws AUTH_UNAUTHORIZED when google-auth-library rejects the signature', async () => {
+      const verifyIdToken = jest.fn().mockRejectedValue(new Error('Wrong recipient'));
+      (OAuth2Client as jest.MockedClass<typeof OAuth2Client>).mockImplementation(
+        () => ({ verifyIdToken }) as unknown as OAuth2Client,
+      );
+
+      const service = new OAuthVerifierService(config);
+      await expect(service.verifyGoogle('bad-token')).rejects.toMatchObject({
+        code: ErrorCode.AUTH_UNAUTHORIZED,
+      });
+    });
+  });
+
+  describe('production mode — Apple', () => {
+    const config = {
+      oauthDevMode: false,
+      googleOAuthClientId: 'test-google',
+      appleOAuthAudience: 'app.shoppa',
+    } as unknown as AppConfigService;
+
+    it('returns the verified identity when jose accepts the token', async () => {
+      (jwtVerify as jest.Mock).mockResolvedValue({
+        payload: {
+          sub: 'apple-prod-1',
+          email: 'apple@example.com',
+          email_verified: 'true',
+          given_name: 'Apple',
+          family_name: 'User',
+        },
+      });
+
+      const service = new OAuthVerifierService(config);
+      const identity = await service.verifyApple('real-apple-token');
+
+      expect(jwtVerify).toHaveBeenCalledWith('real-apple-token', expect.any(Function), {
+        issuer: 'https://appleid.apple.com',
+        audience: 'app.shoppa',
+      });
+      expect(identity.provider).toBe('apple');
+      expect(identity.providerUserId).toBe('apple-prod-1');
+    });
+
+    it('throws AUTH_UNAUTHORIZED when jose rejects the audience', async () => {
+      (jwtVerify as jest.Mock).mockRejectedValue(new Error('unexpected "aud" claim value'));
+
+      const service = new OAuthVerifierService(config);
+      await expect(service.verifyApple('wrong-aud-token')).rejects.toMatchObject({
         code: ErrorCode.AUTH_UNAUTHORIZED,
       });
     });

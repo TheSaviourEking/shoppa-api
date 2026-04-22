@@ -1,9 +1,14 @@
 import { Injectable } from '@nestjs/common';
+import { OAuth2Client, type TokenPayload } from 'google-auth-library';
+import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from 'jose';
 import * as jwt from 'jsonwebtoken';
 import { AppException } from '../../../common/exceptions/app.exception';
 import { ErrorCode } from '../../../common/exceptions/error-codes';
 import { AppConfigService } from '../../../config/config.service';
 import type { OAuthIdentity } from './oauth.types';
+
+const APPLE_ISSUER = 'https://appleid.apple.com';
+const APPLE_JWKS_URL = new URL('https://appleid.apple.com/auth/keys');
 
 /**
  * Shape of the JWT payload Google and Apple put inside their OIDC
@@ -22,28 +27,34 @@ interface OidcLikePayload {
 
 @Injectable()
 export class OAuthVerifierService {
+  // Lazily created so dev runs don't pay the cost of constructing
+  // either client unless prod-mode verification actually fires.
+  private googleClient?: OAuth2Client;
+  private appleJwks?: JWTVerifyGetKey;
+
   constructor(private readonly config: AppConfigService) {}
 
-  // Public methods are async so production verification (which will
-  // hit the network) can be added later without changing the surface.
   async verifyGoogle(idToken: string): Promise<OAuthIdentity> {
-    return Promise.resolve(this.toIdentity('google', this.decode(idToken)));
+    const payload = await this.verify('google', idToken);
+    return this.toIdentity('google', payload);
   }
 
   async verifyApple(identityToken: string): Promise<OAuthIdentity> {
-    return Promise.resolve(this.toIdentity('apple', this.decode(identityToken)));
+    const payload = await this.verify('apple', identityToken);
+    return this.toIdentity('apple', payload);
   }
 
-  private decode(token: string): OidcLikePayload {
-    if (!this.config.oauthDevMode) {
-      // Production verification (Google's tokeninfo endpoint, Apple's
-      // JWKS) is intentionally out of scope for this assessment build.
-      // The README documents the stub clearly.
-      throw new AppException(
-        ErrorCode.AUTH_UNAUTHORIZED,
-        'Production OAuth verification is not configured in this build',
-      );
+  private async verify(
+    provider: OAuthIdentity['provider'],
+    token: string,
+  ): Promise<OidcLikePayload> {
+    if (this.config.oauthDevMode) {
+      return this.devDecode(token);
     }
+    return provider === 'google' ? this.verifyGoogleProd(token) : this.verifyAppleProd(token);
+  }
+
+  private devDecode(token: string): OidcLikePayload {
     // Dev mode: trust the token's payload without verifying its
     // signature. This lets the mobile app POST a synthesised id_token
     // and exercise the full signup-or-login path end-to-end.
@@ -52,6 +63,53 @@ export class OAuthVerifierService {
       throw new AppException(ErrorCode.AUTH_UNAUTHORIZED, 'OAuth token is malformed');
     }
     return decoded;
+  }
+
+  private async verifyGoogleProd(token: string): Promise<OidcLikePayload> {
+    // The cross-field check in env.ts guarantees the audience is
+    // present whenever we reach here, but assert defensively so the
+    // type narrows.
+    const audience = this.config.googleOAuthClientId;
+    if (!audience) {
+      throw new AppException(ErrorCode.AUTH_UNAUTHORIZED, 'Google audience is not configured');
+    }
+    this.googleClient ??= new OAuth2Client();
+    let payload: TokenPayload | undefined;
+    try {
+      const ticket = await this.googleClient.verifyIdToken({ idToken: token, audience });
+      payload = ticket.getPayload();
+    } catch (err) {
+      throw new AppException(
+        ErrorCode.AUTH_UNAUTHORIZED,
+        `Google id_token verification failed: ${(err as Error).message}`,
+      );
+    }
+    if (!payload) {
+      throw new AppException(ErrorCode.AUTH_UNAUTHORIZED, 'Google id_token has no payload');
+    }
+    return payload;
+  }
+
+  private async verifyAppleProd(token: string): Promise<OidcLikePayload> {
+    const audience = this.config.appleOAuthAudience;
+    if (!audience) {
+      throw new AppException(ErrorCode.AUTH_UNAUTHORIZED, 'Apple audience is not configured');
+    }
+    this.appleJwks ??= createRemoteJWKSet(APPLE_JWKS_URL);
+    let payload: JWTPayload;
+    try {
+      const result = await jwtVerify(token, this.appleJwks, {
+        issuer: APPLE_ISSUER,
+        audience,
+      });
+      payload = result.payload;
+    } catch (err) {
+      throw new AppException(
+        ErrorCode.AUTH_UNAUTHORIZED,
+        `Apple identity_token verification failed: ${(err as Error).message}`,
+      );
+    }
+    return payload;
   }
 
   private toIdentity(provider: OAuthIdentity['provider'], payload: OidcLikePayload): OAuthIdentity {

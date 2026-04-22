@@ -6,5 +6,8 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
+  "moduleNameMapper": {
+    "^jose$": "<rootDir>/mocks/jose.ts"
+  },
   "testTimeout": 30000
 }
