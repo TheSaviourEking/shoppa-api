@@ -7,6 +7,7 @@ import { ConversationsModule } from './modules/conversations/conversations.modul
 import { HealthModule } from './modules/health/health.module';
 import { PostsModule } from './modules/posts/posts.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { WalletModule } from './modules/wallet/wallet.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 
@@ -22,6 +23,7 @@ import { RedisModule } from './redis/redis.module';
     AddressesModule,
     PostsModule,
     ConversationsModule,
+    WalletModule,
   ],
   controllers: [],
   providers: [],
