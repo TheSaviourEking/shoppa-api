@@ -87,3 +87,17 @@ export class LogoutDto {
   @IsNotEmpty()
   refreshToken!: string;
 }
+
+export class OAuthGoogleDto {
+  @ApiProperty({ description: 'Google OIDC id_token from Sign In With Google' })
+  @IsString()
+  @IsNotEmpty()
+  idToken!: string;
+}
+
+export class OAuthAppleDto {
+  @ApiProperty({ description: 'Apple identity_token from Sign In With Apple' })
+  @IsString()
+  @IsNotEmpty()
+  identityToken!: string;
+}

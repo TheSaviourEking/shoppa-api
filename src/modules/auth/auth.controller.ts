@@ -4,16 +4,22 @@ import { AuthService, type AuthResult, type AuthTokens } from './auth.service';
 import {
   LoginDto,
   LogoutDto,
+  OAuthAppleDto,
+  OAuthGoogleDto,
   OtpRequestDto,
   OtpVerifyDto,
   RefreshDto,
   SignupDto,
 } from './dto/auth.dto';
+import { OAuthVerifierService } from './oauth/oauth-verifier.service';
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly oauth: OAuthVerifierService,
+  ) {}
 
   @Post('otp/request')
   @HttpCode(HttpStatus.OK)
@@ -48,5 +54,19 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async logout(@Body() body: LogoutDto): Promise<void> {
     await this.auth.logout(body.refreshToken);
+  }
+
+  @Post('oauth/google')
+  @HttpCode(HttpStatus.OK)
+  async oauthGoogle(@Body() body: OAuthGoogleDto): Promise<AuthResult> {
+    const identity = await this.oauth.verifyGoogle(body.idToken);
+    return this.auth.oauthSignupOrLogin(identity);
+  }
+
+  @Post('oauth/apple')
+  @HttpCode(HttpStatus.OK)
+  async oauthApple(@Body() body: OAuthAppleDto): Promise<AuthResult> {
+    const identity = await this.oauth.verifyApple(body.identityToken);
+    return this.auth.oauthSignupOrLogin(identity);
   }
 }

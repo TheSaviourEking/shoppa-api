@@ -15,6 +15,15 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 chars'),
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('30d'),
+
+  // OAuth — when true, the OAuth verifier decodes provider tokens
+  // without signature verification. Suitable for local development
+  // and the assessment review; production must set this to false and
+  // wire real google-auth-library / Apple JWKS verification.
+  OAUTH_DEV_MODE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof envSchema>;

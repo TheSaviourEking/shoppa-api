@@ -52,6 +52,10 @@ export class AppConfigService {
     return env.JWT_REFRESH_TTL;
   }
 
+  get oauthDevMode(): boolean {
+    return env.OAUTH_DEV_MODE;
+  }
+
   get isProduction(): boolean {
     return env.NODE_ENV === 'production';
   }

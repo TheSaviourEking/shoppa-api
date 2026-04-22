@@ -6,6 +6,7 @@ import { ErrorCode } from '../../common/exceptions/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PasswordService } from './credentials/password.service';
 import { normalisePhone } from './credentials/phone.util';
+import type { OAuthIdentity } from './oauth/oauth.types';
 import { OtpService } from './otp/otp.service';
 import { JwtTokenService } from './tokens/jwt-token.service';
 
@@ -150,6 +151,35 @@ export class AuthService {
     if (!user?.passwordHash || !ok) {
       throw new AppException(ErrorCode.AUTH_INVALID_CREDENTIALS, 'Invalid credentials');
     }
+
+    const tokens = await this.issueTokens(user.id);
+    return { user: stripSensitive(user), ...tokens };
+  }
+
+  // ─── OAuth signup-or-login ──────────────────────────────────────────
+
+  async oauthSignupOrLogin(identity: OAuthIdentity): Promise<AuthResult> {
+    if (!identity.emailVerified) {
+      // Apple/Google both verify emails before issuing the token; if
+      // the claim is missing the token is suspect.
+      throw new AppException(
+        ErrorCode.AUTH_INVALID_CREDENTIALS,
+        'OAuth provider has not verified the email',
+      );
+    }
+
+    const existing = await this.prisma.user.findUnique({ where: { email: identity.email } });
+    const user =
+      existing ??
+      (await this.prisma.user.create({
+        data: {
+          firstName: identity.firstName ?? '',
+          lastName: identity.lastName ?? '',
+          email: identity.email,
+          // OAuth-only accounts have no phone or password.
+          wallet: { create: { virtualAccountNumber: this.generateVirtualAccountNumber() } },
+        },
+      }));
 
     const tokens = await this.issueTokens(user.id);
     return { user: stripSensitive(user), ...tokens };

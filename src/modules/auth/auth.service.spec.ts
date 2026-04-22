@@ -307,6 +307,75 @@ describe('AuthService', () => {
     });
   });
 
+  // ─── OAuth signup-or-login ──────────────────────────────────────────
+
+  describe('oauthSignupOrLogin', () => {
+    const baseIdentity = {
+      provider: 'google' as const,
+      providerUserId: 'google-1',
+      email: 'aidanma@example.com',
+      emailVerified: true,
+      firstName: 'Aidanma',
+      lastName: 'Toluwalope',
+    };
+
+    it('creates a user with no phone or password when the email is new (signup path)', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.create.mockResolvedValue(buildUser({ phone: null, passwordHash: null }));
+      prisma.refreshToken.create.mockResolvedValue(buildRow({}));
+
+      const result = await service.oauthSignupOrLogin(baseIdentity);
+
+      expect(result.user.email).toBe('aidanma@example.com');
+      expect(prisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            email: 'aidanma@example.com',
+            firstName: 'Aidanma',
+            lastName: 'Toluwalope',
+            wallet: { create: expect.any(Object) },
+          }),
+        }),
+      );
+      // No phone or password is passed to create — the columns stay null.
+      const args = prisma.user.create.mock.calls[0][0];
+      expect(args.data.phone).toBeUndefined();
+      expect(args.data.passwordHash).toBeUndefined();
+    });
+
+    it('logs the user in (login path) when the email already matches a user', async () => {
+      const existing = buildUser({ phone: null, passwordHash: null });
+      prisma.user.findUnique.mockResolvedValue(existing);
+      prisma.refreshToken.create.mockResolvedValue(buildRow({}));
+
+      const result = await service.oauthSignupOrLogin(baseIdentity);
+
+      expect(result.user.id).toBe(existing.id);
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects identities whose email is not provider-verified', async () => {
+      await expect(
+        service.oauthSignupOrLogin({ ...baseIdentity, emailVerified: false }),
+      ).rejects.toMatchObject({ code: ErrorCode.AUTH_INVALID_CREDENTIALS });
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('handles Apple identities the same way as Google (linked by email)', async () => {
+      const existing = buildUser({ phone: null, passwordHash: null });
+      prisma.user.findUnique.mockResolvedValue(existing);
+      prisma.refreshToken.create.mockResolvedValue(buildRow({}));
+
+      const result = await service.oauthSignupOrLogin({
+        ...baseIdentity,
+        provider: 'apple',
+        providerUserId: 'apple-9',
+      });
+      expect(result.user.id).toBe(existing.id);
+    });
+  });
+
   describe('logout', () => {
     it('revokes the matching refresh token row', async () => {
       const refreshHash = await password.hash('jti-1');
