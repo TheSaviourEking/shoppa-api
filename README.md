@@ -26,7 +26,8 @@ real database constraints. No fake data, no skipped flows.
 | Cache / OTP / sessions | Redis | 7 (alpine) |
 | ORM | Prisma | 6 |
 | Auth | JWT access + rotating refresh + bcrypt + libphonenumber-js | — |
-| OAuth | Google + Apple OIDC | dev-mode decode (see [stubs](#known-stubs--limitations)) |
+| OAuth | Google + Apple OIDC | real signature + audience verification (`google-auth-library` + `jose`); dev-mode bypass for the test rig — see [stubs](#known-stubs--limitations) |
+| Object storage | S3-compatible — MinIO in dev, Cloudflare R2 (or any equivalent) in prod | swap by env vars only |
 | HTTP | Express via `@nestjs/platform-express` + helmet | — |
 | Validation | class-validator + class-transformer + Zod (env) | — |
 | Tests | Jest + ioredis-mock | 60%+ on service layer required by brief |
@@ -37,7 +38,7 @@ real database constraints. No fake data, no skipped flows.
 
 - **Node.js** `>=20.0.0 <23.0.0` (the brief specifies 20 LTS)
 - **npm** (bundled with Node)
-- **Docker + Docker Compose** for Postgres and Redis (no native install needed)
+- **Docker + Docker Compose** for Postgres, Redis, and MinIO (no native install needed)
 
 ## Quick start (cold clone → running in under 5 minutes)
 
@@ -45,9 +46,10 @@ real database constraints. No fake data, no skipped flows.
 # 1. Install
 npm install
 
-# 2. Bring up Postgres 18 + Redis 7
+# 2. Bring up Postgres 18 + Redis 7 + MinIO (S3-compatible)
 docker compose up -d
 # wait for the healthchecks to pass (~5–10s)
+# minio-init runs once and creates the shoppa-uploads bucket with public-read policy
 
 # 3. Wire env
 cp .env.example .env
@@ -67,7 +69,10 @@ The server listens on **`http://localhost:3000`**:
 - `GET  /health` — liveness probe (DB ping + uptime)
 - `GET  /docs` — Swagger UI for the entire API
 - `POST /api/v1/...` — versioned endpoints
-- `GET  /uploads/...` — public static-served file reads
+
+Uploaded files are served by **MinIO directly** at
+`http://localhost:9000/shoppa-uploads/<key>`. The MinIO console is at
+`http://localhost:9001` (login: `minioadmin` / `minioadmin`).
 
 A first smoke test once running:
 
@@ -88,16 +93,23 @@ start.
 | `PORT` | `3000` | HTTP listen port |
 | `DATABASE_URL` | `postgresql://shoppa:shoppa@localhost:5432/shoppa` | Prisma connection |
 | `REDIS_URL` | `redis://localhost:6379` | OTP storage + rate-limit counters |
-| `API_PREFIX` | `api/v1` | Route prefix (excluded for `/health` and `/uploads`) |
+| `API_PREFIX` | `api/v1` | Route prefix (excluded for `/health`) |
 | `CORS_ORIGINS` | (unset → all) | Comma-separated allow-list for browser clients |
 | `JWT_ACCESS_SECRET` | — | Min 32 chars; signs access tokens |
 | `JWT_REFRESH_SECRET` | — | Min 32 chars; signs refresh tokens |
 | `JWT_ACCESS_TTL` | `15m` | jsonwebtoken-style duration |
 | `JWT_REFRESH_TTL` | `30d` | jsonwebtoken-style duration |
-| `OAUTH_DEV_MODE` | `true` | When `true`, OAuth tokens are decoded without verifying signatures (see [stubs](#known-stubs--limitations)) |
-| `UPLOADS_DIR` | `./uploads` | On-disk storage for uploaded files |
+| `OAUTH_DEV_MODE` | `true` | When `true`, OAuth tokens are decoded without signature verification — convenient for the test rig. Production sets `false` to enable real Google + Apple verification (see [Production OAuth setup](#production-oauth-setup)) |
+| `GOOGLE_OAUTH_CLIENT_ID` | (unset) | Required when `OAUTH_DEV_MODE=false` — audience for `verifyIdToken` |
+| `APPLE_OAUTH_AUDIENCE` | (unset) | Required when `OAUTH_DEV_MODE=false` — Apple Service ID |
 | `UPLOADS_MAX_BYTES` | `10485760` (10MB) | Rejected at multer + the service layer |
-| `UPLOADS_PUBLIC_BASE_URL` | `/uploads` | Path uploaded URLs are served from |
+| `S3_ENDPOINT` | `http://localhost:9000` | S3 API endpoint — MinIO in dev, R2 in prod |
+| `S3_REGION` | `auto` | Required by SDK; R2 accepts `auto` |
+| `S3_BUCKET` | `shoppa-uploads` | Bucket name |
+| `S3_ACCESS_KEY_ID` | `minioadmin` | Access key (R2 access key in prod) |
+| `S3_SECRET_ACCESS_KEY` | `minioadmin` | Secret (R2 secret in prod) |
+| `S3_PUBLIC_BASE_URL` | `http://localhost:9000/shoppa-uploads` | Base URL we hand back to clients (your R2 custom domain in prod) |
+| `S3_FORCE_PATH_STYLE` | `true` | MinIO needs path-style; R2 also accepts |
 
 ## Endpoints (high-level reference)
 
@@ -144,18 +156,19 @@ server runs.
 | `POST /wallet/topup` | Synchronous top-up stub |
 | `POST /feedback` | Report-a-problem or general feedback |
 
-### Static
+### Object storage (served by MinIO/R2 directly)
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /uploads/<key>` | Public read for uploaded files (Express static, outside the API prefix so URLs round-trip cleanly) |
+| `GET <S3_PUBLIC_BASE_URL>/<key>` | Public read of an uploaded file. The `url` field returned from `POST /uploads` is already this fully-qualified URL — clients prepend nothing. In dev that's `http://localhost:9000/shoppa-uploads/<key>` (MinIO); in prod it's whatever you set `S3_PUBLIC_BASE_URL` to. |
 
 ## Running the tests
 
 ```bash
-npm test                       # all unit tests
+npm test                       # 100+ unit tests
 npm run test:cov               # with coverage report
 npm run test:watch             # watch mode
+npm run test:e2e               # 15 e2e tests against real Postgres + Redis + MinIO
 ```
 
 Coverage on the service layer averages **~92%** across all twelve
@@ -219,7 +232,8 @@ unwinds as a unit.
 
 ```
 src/
-├── main.ts                     bootstrap (helmet, CORS, ValidationPipe, Swagger, /uploads static)
+├── main.ts                     bootstrap (Swagger registration, app.listen)
+├── bootstrap.ts                shared configureApp (helmet, CORS, ValidationPipe, prefix)
 ├── app.module.ts               module composition
 ├── config/                     Zod-validated env + injectable AppConfigService
 ├── common/                     response envelope, error codes, exception filter
@@ -227,7 +241,7 @@ src/
 ├── redis/                      ioredis client
 └── modules/
     ├── auth/                   JWT, password, OTP, OAuth verifier, signup/login/refresh/logout
-    ├── uploads/                multer-backed file persistence
+    ├── uploads/                S3-compatible object storage via @aws-sdk/client-s3
     ├── addresses/              CRUD with one-default invariant
     ├── posts/                  posts + items + categories
     ├── conversations/          conversations, messages, blocks
@@ -239,38 +253,101 @@ prisma/
 ├── schema.prisma               Page 3 data model
 ├── migrations/                 generated SQL (apply with prisma migrate deploy)
 └── seed.ts                     idempotent category upsert
+test/
+├── e2e/golden-path.e2e-spec.ts buyer flow against real Postgres + Redis + MinIO
+└── mocks/jose.ts               module-name-mapped stub for jose (ESM) so unit tests load cleanly
 ```
+
+## Production OAuth setup
+
+Switch `OAUTH_DEV_MODE=false` and provide both audiences. The env
+loader fails fast otherwise — production cannot accept arbitrary
+Google/Apple-issued tokens.
+
+```bash
+OAUTH_DEV_MODE=false
+GOOGLE_OAUTH_CLIENT_ID=<your-google-cloud-oauth-client-id>.apps.googleusercontent.com
+APPLE_OAUTH_AUDIENCE=<your-apple-services-id>
+```
+
+Real verification then runs against Google's tokeninfo / public certs
+(via `google-auth-library`) and Apple's JWKS at
+`https://appleid.apple.com/auth/keys` (via `jose`), asserting
+signature, issuer, audience, and expiry. Library failures translate
+to `AppException(AUTH_UNAUTHORIZED)` so the response envelope stays
+consistent with the rest of the API.
+
+## Production object storage setup
+
+Point the seven `S3_*` env vars at any S3-compatible service — no
+code change needed. Cloudflare R2 example:
+
+```bash
+S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+S3_REGION=auto
+S3_BUCKET=shoppa-uploads
+S3_ACCESS_KEY_ID=<r2-access-key-id>
+S3_SECRET_ACCESS_KEY=<r2-secret-access-key>
+S3_PUBLIC_BASE_URL=https://uploads.shoppa.app   # your R2 custom domain
+S3_FORCE_PATH_STYLE=true
+```
+
+R2 is free up to 10GB storage / 1M Class A ops / 10M Class B ops per
+month with **zero egress** — a good fit when the mobile client
+fetches images frequently. AWS S3, Backblaze B2, Storj, MinIO
+self-hosted — all work with the same code path.
 
 ## Known stubs & limitations
 
 These are intentional shortcuts for the 72-hour assessment build —
 each is documented here so reviewers don't go hunting.
 
-- **OAuth signature verification is stubbed in dev mode.** With
-  `OAUTH_DEV_MODE=true` the verifier decodes the id_token without
-  checking its signature so the mobile dev loop can synthesise tokens
-  via `jsonwebtoken.sign`. Production must set `OAUTH_DEV_MODE=false`
-  and add `google-auth-library` + an Apple JWKS lookup; the failure
-  path already returns the right `AppException`.
-- **Phone OTP is logged to the console in dev.** No SMS provider is
-  wired. The OTP is also returned in the response under `devCode` when
-  `NODE_ENV !== 'production'`.
-- **Wallet top-up is a synchronous stub.** A real payment rail would
-  call the provider and wait for a webhook. Here, top-up immediately
-  increments the balance and writes a `TOPUP` transaction.
-- **Push notifications are reduced to a boolean preference** on the
-  user (`notificationsEnabled`). No real APNs/FCM integration. The bell
+### Real implementations now wired
+
+The OAuth and uploads stubs from the original brief have been
+replaced with production-credible integrations:
+
+- **OAuth signature verification.** Dev mode (`OAUTH_DEV_MODE=true`,
+  the default for the test rig) decodes id_tokens via `jwt.decode`
+  so the mobile dev loop can synthesise tokens with
+  `jsonwebtoken.sign`. Production (`OAUTH_DEV_MODE=false`) does
+  real Google + Apple signature + audience verification — see
+  [Production OAuth setup](#production-oauth-setup).
+- **Object storage.** Files go to an S3-compatible service in both
+  dev and prod — MinIO via docker-compose locally, Cloudflare R2 (or
+  any equivalent) in prod. See
+  [Production object storage setup](#production-object-storage-setup).
+
+### Genuine stubs (need paid third-party services)
+
+- **Phone OTP delivery.** The 6-digit code is logged to the console
+  in dev and returned in the response under `devCode` when
+  `NODE_ENV !== 'production'`. Production would swap the log line for
+  a Twilio / Termii / SNS call.
+- **Wallet top-up.** A real payment rail would initiate a transaction
+  with the provider (Paystack, Flutterwave, etc.), wait for a webhook
+  to confirm, then increment the balance. Here, top-up is synchronous:
+  it credits the balance immediately and writes a `TOPUP` row. Same
+  endpoint shape, async-ready architecture in front of it (the
+  webhook handler is the only addition needed).
+- **Virtual account number generation.** Each new wallet gets a
+  random 10-digit account number at signup — production would call
+  the payment provider's virtual-account API and store the issued
+  number instead. The Wallet model already has the `virtualAccountProvider`
+  + `virtualAccountNumber` columns ready.
+- **Password-reset email delivery.** The reset token is logged to
+  the console in dev. The token format, hashing, and TTL are all
+  real; production would swap the log line for SendGrid / Resend / SES.
+- **Push notifications.** Reduced to a boolean preference on the user
+  (`notificationsEnabled`). No real APNs/FCM integration. The bell
   icon on the messages list is purely UI.
-- **Uploads are local-disk + static-served.** Production would write to
-  S3 (or equivalent) and serve via signed URLs. The Upload model
-  already separates `key` from `url` so swapping the storage backend
-  is contained to `UploadsService.persist`.
-- **Password-reset emails are logged to the console.** The email
-  delivery layer is out of scope; the token format and TTL are real.
+
+### Out of scope by assessment design
+
 - **No "offers" model.** The post-success screen mentions offers but
-  the offer-management UI is on a different page (other developers'
-  scope). The schema's `Post.shopperId` slot is the join point when
-  that flow lands.
+  the offer-management UI is on another developer's page. The
+  schema's `Post.shopperId` slot is the join point when that flow
+  lands.
 - **Geocoding / address autocomplete** in the new-address screen is a
   mobile + 3rd-party concern (Google Places). The backend stores
   whatever the client submits.
