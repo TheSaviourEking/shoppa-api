@@ -5,6 +5,7 @@ import { AddressesModule } from './modules/addresses/addresses.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { HealthModule } from './modules/health/health.module';
+import { MeModule } from './modules/me/me.module';
 import { PostsModule } from './modules/posts/posts.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { WalletModule } from './modules/wallet/wallet.module';
@@ -24,6 +25,7 @@ import { RedisModule } from './redis/redis.module';
     PostsModule,
     ConversationsModule,
     WalletModule,
+    MeModule,
   ],
   controllers: [],
   providers: [],
