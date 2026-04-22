@@ -165,6 +165,131 @@ server runs.
 |---|---|
 | `GET <S3_PUBLIC_BASE_URL>/<key>` | Public read of an uploaded file. The `url` field returned from `POST /uploads` is already this fully-qualified URL — clients prepend nothing. In dev that's `http://localhost:9000/shoppa-uploads/<key>` (MinIO); in prod it's whatever you set `S3_PUBLIC_BASE_URL` to. |
 
+## Mobile development
+
+The mobile app lives in a separate repo (`shoppa-mobile`, Expo +
+expo-router). This section captures the moving parts a mobile dev
+needs to know to talk to this backend.
+
+### API base URL by runtime
+
+The mobile client should read its base URL from
+`EXPO_PUBLIC_API_BASE_URL`. The right value depends on where the
+app is running:
+
+| Runtime | `EXPO_PUBLIC_API_BASE_URL` |
+|---|---|
+| iOS Simulator | `http://localhost:3000` |
+| Android Emulator | `http://10.0.2.2:3000` (the emulator's loopback to host) |
+| Physical device on same Wi-Fi | `http://<your-mac-LAN-ip>:3000` (e.g. `http://192.168.1.42:3000`) |
+| Production | `https://api.shoppa.app` (or wherever you deploy) |
+
+For the same-Wi-Fi case, also make sure CORS is happy — the backend
+defaults to allow-all in dev. If `CORS_ORIGINS` is set to a specific
+list, add the LAN URL.
+
+### Auth header pattern
+
+Every protected endpoint expects:
+
+```
+Authorization: Bearer <accessToken>
+```
+
+The mobile should:
+1. Persist the refresh token (e.g. SecureStore on Expo).
+2. Hold the access token in memory.
+3. On 401 with `error.code === 'AUTH_UNAUTHORIZED'`, hit `POST /auth/refresh`, swap the new tokens, retry the original request.
+4. On any failure of `/auth/refresh` (`AUTH_INVALID_REFRESH`), drop both tokens and bounce to onboarding.
+
+### OAuth dev-token snippet (because `OAUTH_DEV_MODE=true`)
+
+While the backend runs in dev mode it accepts any JWT-shaped token
+without verifying its signature — which means the mobile dev loop
+doesn't need real Google / Apple SDKs. Synthesise a token with
+`jsonwebtoken`:
+
+```ts
+import { sign } from 'jsonwebtoken';
+
+// On the "Sign up with Google" button, in dev:
+const idToken = sign(
+  {
+    sub: 'dev-google-1',                  // any unique provider user id
+    email: 'aidanma@example.com',         // claimed email
+    email_verified: true,                 // required by AuthService
+    given_name: 'Aidanma',
+    family_name: 'Toluwalope',
+  },
+  'devsecret',                            // signature is ignored in dev mode
+);
+
+const res = await fetch(`${BASE_URL}/api/v1/auth/oauth/google`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ idToken }),
+});
+```
+
+For Apple, swap the endpoint to `/auth/oauth/apple` and the body
+field to `identityToken`. Production builds (when you flip
+`OAUTH_DEV_MODE=false`) replace this with real
+`@react-native-google-signin/google-signin` and
+`expo-apple-authentication` flows that hand back real provider
+tokens — same backend call, real signature.
+
+### Error code reference
+
+The mobile client should switch on `error.code` strings (stable wire
+contract) rather than parsing English. Mirror this enum on the
+mobile side — copy-paste from
+[src/common/exceptions/error-codes.ts](src/common/exceptions/error-codes.ts):
+
+```ts
+export const ErrorCode = {
+  // Auth
+  AUTH_INVALID_CREDENTIALS: 'AUTH_INVALID_CREDENTIALS',
+  AUTH_INVALID_OTP: 'AUTH_INVALID_OTP',
+  AUTH_OTP_EXPIRED: 'AUTH_OTP_EXPIRED',
+  AUTH_OTP_RATE_LIMITED: 'AUTH_OTP_RATE_LIMITED',
+  AUTH_PHONE_IN_USE: 'AUTH_PHONE_IN_USE',
+  AUTH_EMAIL_IN_USE: 'AUTH_EMAIL_IN_USE',
+  AUTH_INVALID_REFRESH: 'AUTH_INVALID_REFRESH',
+  AUTH_UNAUTHORIZED: 'AUTH_UNAUTHORIZED',
+  AUTH_FORBIDDEN: 'AUTH_FORBIDDEN',
+  // Generic
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  NOT_FOUND: 'NOT_FOUND',
+  CONFLICT: 'CONFLICT',
+  // Domain
+  WALLET_INSUFFICIENT_FUNDS: 'WALLET_INSUFFICIENT_FUNDS',
+  POST_NOT_ELIGIBLE: 'POST_NOT_ELIGIBLE',
+  UPLOAD_TOO_LARGE: 'UPLOAD_TOO_LARGE',
+  UPLOAD_INVALID_TYPE: 'UPLOAD_INVALID_TYPE',
+  // Last resort
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const;
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+```
+
+The full set is documented per-endpoint at `/docs` — every error
+status lists the codes it may return as an `enum` on the schema.
+
+### Phone number format
+
+The mobile collects a bare local number (e.g. `08012345678`); the
+backend normalises to E.164 (`+2348012345678`) before hitting the
+unique index. The Nigeria region is the parser default — already-E.164
+international numbers (`+1…`) are accepted as-is.
+
+### Pagination cursors
+
+Two endpoints paginate: `/conversations/:id/messages` and
+`/wallet/transactions`. Both use `?before=<id>&limit=<n>`. To
+implement infinite scroll, take the last-rendered row's `id`, pass
+it as `before`, and concatenate the response. There are no sentinel
+"end of list" responses — an empty array means you're done.
+
 ## Running the tests
 
 ```bash
