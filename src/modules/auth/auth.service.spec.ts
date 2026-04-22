@@ -18,6 +18,7 @@ class StubConfig {
   jwtAccessTtl = '15m';
   jwtRefreshTtl = '30d';
   isProduction = false;
+  s3PublicBaseUrl = 'http://localhost:9000/shoppa-uploads';
 }
 
 interface UserCreateData {
@@ -111,7 +112,7 @@ describe('AuthService', () => {
     jwt = new JwtTokenService(new JwtService({}), config);
     otp = new OtpService(redis, config);
 
-    service = new AuthService(prisma as unknown as PrismaService, password, otp, jwt);
+    service = new AuthService(prisma as unknown as PrismaService, password, otp, jwt, config);
   });
 
   // ─── OTP → signup token ────────────────────────────────────────────

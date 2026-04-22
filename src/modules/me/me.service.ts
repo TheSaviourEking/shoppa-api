@@ -3,6 +3,7 @@ import { Prisma, type User } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { AppException } from '../../common/exceptions/app.exception';
 import { ErrorCode } from '../../common/exceptions/error-codes';
+import { type PublicUser, toPublicUser } from '../../common/serializers/public-user';
 import { AppConfigService } from '../../config/config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PasswordService } from '../auth/credentials/password.service';
@@ -27,17 +28,21 @@ export class MeService {
     private readonly config: AppConfigService,
   ) {}
 
-  async getMe(userId: string): Promise<User> {
+  private toPublic(user: User): PublicUser {
+    return toPublicUser(user, this.config.s3PublicBaseUrl);
+  }
+
+  async getMe(userId: string): Promise<PublicUser> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new AppException(ErrorCode.NOT_FOUND, 'User not found');
     }
-    return user;
+    return this.toPublic(user);
   }
 
-  async updateProfile(userId: string, input: UpdateProfileDto): Promise<User> {
+  async updateProfile(userId: string, input: UpdateProfileDto): Promise<PublicUser> {
     try {
-      return await this.prisma.user.update({
+      const updated = await this.prisma.user.update({
         where: { id: userId },
         data: {
           firstName: input.firstName,
@@ -46,6 +51,7 @@ export class MeService {
           avatarKey: input.avatarKey,
         },
       });
+      return this.toPublic(updated);
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         throw new AppException(ErrorCode.AUTH_EMAIL_IN_USE, 'Email is already registered');
@@ -54,11 +60,12 @@ export class MeService {
     }
   }
 
-  updateNotifications(userId: string, input: UpdateNotificationsDto): Promise<User> {
-    return this.prisma.user.update({
+  async updateNotifications(userId: string, input: UpdateNotificationsDto): Promise<PublicUser> {
+    const updated = await this.prisma.user.update({
       where: { id: userId },
       data: { notificationsEnabled: input.enabled },
     });
+    return this.toPublic(updated);
   }
 
   async changePassword(userId: string, input: ChangePasswordDto): Promise<void> {

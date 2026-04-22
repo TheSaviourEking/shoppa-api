@@ -3,6 +3,8 @@ import { type User, UserGoal } from '@prisma/client';
 import { randomBytes, randomInt } from 'node:crypto';
 import { AppException } from '../../common/exceptions/app.exception';
 import { ErrorCode } from '../../common/exceptions/error-codes';
+import { type PublicUser, toPublicUser } from '../../common/serializers/public-user';
+import { AppConfigService } from '../../config/config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PasswordService } from './credentials/password.service';
 import { normalisePhone } from './credentials/phone.util';
@@ -19,18 +21,7 @@ export interface AuthResult extends AuthTokens {
   user: PublicUser;
 }
 
-export type PublicUser = Pick<
-  User,
-  | 'id'
-  | 'firstName'
-  | 'lastName'
-  | 'email'
-  | 'phone'
-  | 'avatarKey'
-  | 'goal'
-  | 'notificationsEnabled'
-  | 'createdAt'
->;
+export type { PublicUser };
 
 const REFRESH_TTL_DAYS = 30;
 
@@ -41,31 +32,6 @@ const TIMING_STUB_HASH = '$2b$12$ulqYa2DR4dOnMNiiJBVUZu6Uyj/VlU4nA2vOZFMiInf0W54
 
 const isLikelyPhone = (input: string): boolean => /[+0-9]/.test(input.charAt(0));
 
-const stripSensitive = (user: User): PublicUser => {
-  const {
-    id,
-    firstName,
-    lastName,
-    email,
-    phone,
-    avatarKey,
-    goal,
-    notificationsEnabled,
-    createdAt,
-  } = user;
-  return {
-    id,
-    firstName,
-    lastName,
-    email,
-    phone,
-    avatarKey,
-    goal,
-    notificationsEnabled,
-    createdAt,
-  };
-};
-
 @Injectable()
 export class AuthService {
   constructor(
@@ -73,7 +39,12 @@ export class AuthService {
     private readonly password: PasswordService,
     private readonly otp: OtpService,
     private readonly jwt: JwtTokenService,
+    private readonly config: AppConfigService,
   ) {}
+
+  private stripSensitive(user: User): PublicUser {
+    return toPublicUser(user, this.config.s3PublicBaseUrl);
+  }
 
   // ─── OTP ────────────────────────────────────────────────────────────
 
@@ -135,7 +106,7 @@ export class AuthService {
     });
 
     const tokens = await this.issueTokens(user.id);
-    return { user: stripSensitive(user), ...tokens };
+    return { user: this.stripSensitive(user), ...tokens };
   }
 
   // ─── Login ──────────────────────────────────────────────────────────
@@ -153,7 +124,7 @@ export class AuthService {
     }
 
     const tokens = await this.issueTokens(user.id);
-    return { user: stripSensitive(user), ...tokens };
+    return { user: this.stripSensitive(user), ...tokens };
   }
 
   // ─── OAuth signup-or-login ──────────────────────────────────────────
@@ -182,7 +153,7 @@ export class AuthService {
       }));
 
     const tokens = await this.issueTokens(user.id);
-    return { user: stripSensitive(user), ...tokens };
+    return { user: this.stripSensitive(user), ...tokens };
   }
 
   // ─── Refresh & logout ───────────────────────────────────────────────

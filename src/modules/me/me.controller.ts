@@ -9,7 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { User } from '@prisma/client';
+import type { PublicUser } from '../../common/serializers/public-user';
 import { ErrorCode } from '../../common/exceptions/error-codes';
 import {
   ApiErrorResponse,
@@ -38,7 +38,7 @@ export class MeController {
   @ApiOperation({ summary: 'Get the authenticated user' })
   @ApiSuccessResponse(undefined, { description: 'Full User row in `data`' })
   @ApiErrorResponse(401, [ErrorCode.AUTH_UNAUTHORIZED], 'Missing or invalid bearer token')
-  getMe(@CurrentUser() userId: string): Promise<User> {
+  getMe(@CurrentUser() userId: string): Promise<PublicUser> {
     return this.me.getMe(userId);
   }
 
@@ -53,7 +53,10 @@ export class MeController {
   @ApiSuccessResponse(undefined, { description: 'Updated User row in `data`' })
   @ApiErrorResponse(401, [ErrorCode.AUTH_UNAUTHORIZED])
   @ApiErrorResponse(409, [ErrorCode.AUTH_EMAIL_IN_USE], 'Email already in use')
-  updateProfile(@CurrentUser() userId: string, @Body() body: UpdateProfileDto): Promise<User> {
+  updateProfile(
+    @CurrentUser() userId: string,
+    @Body() body: UpdateProfileDto,
+  ): Promise<PublicUser> {
     return this.me.updateProfile(userId, body);
   }
 
@@ -70,7 +73,7 @@ export class MeController {
   updateNotifications(
     @CurrentUser() userId: string,
     @Body() body: UpdateNotificationsDto,
-  ): Promise<User> {
+  ): Promise<PublicUser> {
     return this.me.updateNotifications(userId, body);
   }
 
