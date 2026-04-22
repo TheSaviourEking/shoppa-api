@@ -62,8 +62,14 @@ model User {
   firstName             String   @db.VarChar(100)
   lastName              String   @db.VarChar(100)
   email                 String   @unique @db.VarChar(255)
-  phone                 String   @unique @db.VarChar(20) // E.164
-  passwordHash          String   @db.VarChar(255)
+  // Nullable so users created via OAuth (Apple / Google) can exist
+  // without the phone-OTP step. Still unique when present so the
+  // phone-OTP signup path keeps its idempotent lookup.
+  phone                 String?  @unique @db.VarChar(20) // E.164
+  // Nullable so OAuth-only accounts don't carry an unused stub hash.
+  // Phone-OTP signups always set it; password login is rejected when
+  // this is null (the user must use their OAuth provider).
+  passwordHash          String?  @db.VarChar(255)
   avatarKey             String?  @db.VarChar(255)
   goal                  UserGoal @default(BUY)
   notificationsEnabled  Boolean  @default(true)

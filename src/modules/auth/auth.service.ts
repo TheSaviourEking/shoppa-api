@@ -141,13 +141,13 @@ export class AuthService {
 
   async login(identifier: string, password: string): Promise<AuthResult> {
     const user = await this.findByIdentifier(identifier);
-    // Always run a hash compare even on a missing user so the response
-    // time doesn't leak whether the identifier is registered.
-    const ok = user
-      ? await this.password.verify(password, user.passwordHash)
-      : await this.password.verify(password, TIMING_STUB_HASH);
+    // Always run a hash compare even when the user is missing or has
+    // no password (OAuth-only account) so the response time doesn't
+    // leak which case we hit.
+    const hashToCheck = user?.passwordHash ?? TIMING_STUB_HASH;
+    const ok = await this.password.verify(password, hashToCheck);
 
-    if (!user || !ok) {
+    if (!user?.passwordHash || !ok) {
       throw new AppException(ErrorCode.AUTH_INVALID_CREDENTIALS, 'Invalid credentials');
     }
 
