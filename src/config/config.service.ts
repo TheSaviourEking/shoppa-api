@@ -36,6 +36,22 @@ export class AppConfigService {
       .filter(Boolean);
   }
 
+  get jwtAccessSecret(): string {
+    return env.JWT_ACCESS_SECRET;
+  }
+
+  get jwtRefreshSecret(): string {
+    return env.JWT_REFRESH_SECRET;
+  }
+
+  get jwtAccessTtl(): string {
+    return env.JWT_ACCESS_TTL;
+  }
+
+  get jwtRefreshTtl(): string {
+    return env.JWT_REFRESH_TTL;
+  }
+
   get isProduction(): boolean {
     return env.NODE_ENV === 'production';
   }

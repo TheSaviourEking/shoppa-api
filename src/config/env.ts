@@ -8,6 +8,13 @@ const envSchema = z.object({
   REDIS_URL: z.string().url(),
   API_PREFIX: z.string().default('api/v1'),
   CORS_ORIGINS: z.string().optional(),
+
+  // Auth / JWT — secrets must be at least 32 chars so a leaked
+  // dev value doesn't pass for a production-strength key by accident.
+  JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 chars'),
+  JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 chars'),
+  JWT_ACCESS_TTL: z.string().default('15m'),
+  JWT_REFRESH_TTL: z.string().default('30d'),
 });
 
 export type Env = z.infer<typeof envSchema>;
