@@ -34,6 +34,18 @@ export interface RefreshTokenPayload {
   type: 'refresh';
 }
 
+/**
+ * Short-lived token issued after a successful OTP verify. Carries the
+ * verified phone in `sub` so the signup endpoint can pair the new
+ * account with the proven number without trusting the body.
+ */
+export interface SignupTokenPayload {
+  sub: string;
+  type: 'signup';
+}
+
+const SIGNUP_TTL = '15m';
+
 @Injectable()
 export class JwtTokenService {
   constructor(
@@ -73,6 +85,26 @@ export class JwtTokenService {
     });
     if (decoded.type !== 'refresh') {
       throw new Error('Token is not a refresh token');
+    }
+    return decoded;
+  }
+
+  signSignup(verifiedPhone: string): string {
+    const payload: SignupTokenPayload = { sub: verifiedPhone, type: 'signup' };
+    // Reuses the access secret — signup tokens are short-lived and
+    // single-purpose, so they don't need a separate key.
+    return this.jwt.sign(payload, {
+      secret: this.config.jwtAccessSecret,
+      expiresIn: SIGNUP_TTL as ExpiresIn,
+    });
+  }
+
+  verifySignup(token: string): SignupTokenPayload {
+    const decoded = this.jwt.verify<SignupTokenPayload>(token, {
+      secret: this.config.jwtAccessSecret,
+    });
+    if (decoded.type !== 'signup') {
+      throw new Error('Token is not a signup token');
     }
     return decoded;
   }
