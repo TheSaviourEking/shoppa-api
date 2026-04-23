@@ -30,45 +30,46 @@ export class AuthController {
   @Post('otp/request')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Request a phone OTP',
+    summary: 'Request an email OTP',
     description:
-      'Generates a 6-digit OTP for the supplied phone (E.164-normalised) and stores it in Redis with a 10-minute TTL. Rate-limited to 3 sends per phone per hour. In dev mode the code is returned in `data.devCode` and logged to the server console.',
+      'Generates a 6-digit OTP for the supplied email and stores it in Redis with a 10-minute TTL. Rate-limited to 3 sends per email per hour. In dev mode the code is returned in `data.devCode` and logged to the server console.',
   })
   @ApiSuccessResponse(undefined, { description: '`{expiresInSeconds, devCode?}` envelope' })
-  @ApiErrorResponse(400, [ErrorCode.VALIDATION_ERROR], 'Invalid phone number')
+  @ApiErrorResponse(400, [ErrorCode.VALIDATION_ERROR], 'Invalid email')
   @ApiErrorResponse(429, [ErrorCode.AUTH_OTP_RATE_LIMITED], 'Too many OTP requests')
   requestOtp(@Body() body: OtpRequestDto): Promise<{ expiresInSeconds: number; devCode?: string }> {
-    return this.auth.requestOtp(body.phone);
+    return this.auth.requestOtp(body.email);
   }
 
   @Post('otp/verify')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Verify a phone OTP',
+    summary: 'Verify an email OTP',
     description:
-      'Verifies the OTP and returns a 15-minute `signupToken` bound to the verified phone — present this on POST /auth/signup. Single-use; verifying again returns AUTH_OTP_EXPIRED. After 5 wrong attempts the code is burned.',
+      'Verifies the OTP and returns a 15-minute `signupToken` bound to the verified email — present this on POST /auth/signup. Single-use; verifying again returns AUTH_OTP_EXPIRED. After 5 wrong attempts the code is burned.',
   })
   @ApiSuccessResponse(undefined, { description: '`{signupToken}` envelope' })
   @ApiErrorResponse(
     400,
     [ErrorCode.AUTH_INVALID_OTP, ErrorCode.AUTH_OTP_EXPIRED, ErrorCode.VALIDATION_ERROR],
-    'Wrong code, expired code, or invalid phone',
+    'Wrong code, expired code, or invalid email',
   )
   @ApiErrorResponse(429, [ErrorCode.AUTH_OTP_RATE_LIMITED], 'Too many wrong attempts')
   verifyOtp(@Body() body: OtpVerifyDto): Promise<{ signupToken: string }> {
-    return this.auth.verifyOtp(body.phone, body.code);
+    return this.auth.verifyOtp(body.email, body.code);
   }
 
   @Post('signup')
   @ApiOperation({
-    summary: 'Create an account from a verified phone',
+    summary: 'Create an account from a verified email',
     description:
-      'Trades a `signupToken` (from /auth/otp/verify) plus profile fields for a User row, a Wallet row with a stub virtual account number, and an access + refresh token pair.',
+      'Trades a `signupToken` (from /auth/otp/verify, encoding the verified email) plus profile fields (firstName, lastName, phone, password) for a User row, a Wallet row with a stub virtual account number, and an access + refresh token pair. Phone is collected here on the profile screen and validated against libphonenumber-js.',
   })
   @ApiSuccessResponse(undefined, {
     status: 201,
     description: '`{user, accessToken, refreshToken}` envelope',
   })
+  @ApiErrorResponse(400, [ErrorCode.VALIDATION_ERROR], 'Invalid phone number')
   @ApiErrorResponse(401, [ErrorCode.AUTH_UNAUTHORIZED], 'signupToken invalid or expired')
   @ApiErrorResponse(
     409,

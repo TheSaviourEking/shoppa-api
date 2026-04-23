@@ -11,15 +11,18 @@ const SEND_WINDOW_SECONDS = 60 * 60;
 const MAX_SENDS_PER_WINDOW = 3;
 const MAX_VERIFY_ATTEMPTS = 5;
 
-const codeKey = (phone: string): string => `otp:code:${phone}`;
-const attemptsKey = (phone: string): string => `otp:attempts:${phone}`;
-const sendCountKey = (phone: string): string => `otp:sends:${phone}`;
+// Identifier-agnostic — `identifier` is the string the OTP is bound to
+// (currently an email; previously a phone). Email and phone strings can't
+// collide in the same Redis namespace because their shapes differ.
+const codeKey = (identifier: string): string => `otp:code:${identifier}`;
+const attemptsKey = (identifier: string): string => `otp:attempts:${identifier}`;
+const sendCountKey = (identifier: string): string => `otp:sends:${identifier}`;
 
 export interface OtpRequestResult {
   expiresInSeconds: number;
   /**
    * In non-production environments the generated code is returned so
-   * the mobile dev loop doesn't need a real SMS provider. Production
+   * the dev loop doesn't need a real SMS / email provider. Production
    * never includes this field.
    */
   devCode?: string;
@@ -34,11 +37,11 @@ export class OtpService {
     private readonly config: AppConfigService,
   ) {}
 
-  async request(phone: string): Promise<OtpRequestResult> {
-    // Rate limit per phone, sliding window via INCR + EXPIRE on first hit.
-    const sends = await this.redis.incr(sendCountKey(phone));
+  async request(identifier: string): Promise<OtpRequestResult> {
+    // Rate limit per identifier, sliding window via INCR + EXPIRE on first hit.
+    const sends = await this.redis.incr(sendCountKey(identifier));
     if (sends === 1) {
-      await this.redis.expire(sendCountKey(phone), SEND_WINDOW_SECONDS);
+      await this.redis.expire(sendCountKey(identifier), SEND_WINDOW_SECONDS);
     }
     if (sends > MAX_SENDS_PER_WINDOW) {
       throw new AppException(
@@ -48,11 +51,11 @@ export class OtpService {
     }
 
     const code = this.generateCode();
-    await this.redis.set(codeKey(phone), code, 'EX', CODE_TTL_SECONDS);
-    await this.redis.del(attemptsKey(phone));
+    await this.redis.set(codeKey(identifier), code, 'EX', CODE_TTL_SECONDS);
+    await this.redis.del(attemptsKey(identifier));
 
     if (!this.config.isProduction) {
-      this.logger.log(`OTP for ${phone}: ${code} (dev mode)`);
+      this.logger.log(`OTP for ${identifier}: ${code} (dev mode)`);
     }
 
     return {
@@ -61,20 +64,20 @@ export class OtpService {
     };
   }
 
-  async verify(phone: string, code: string): Promise<void> {
-    const stored = await this.redis.get(codeKey(phone));
+  async verify(identifier: string, code: string): Promise<void> {
+    const stored = await this.redis.get(codeKey(identifier));
     if (!stored) {
       throw new AppException(ErrorCode.AUTH_OTP_EXPIRED, 'OTP has expired or was not requested');
     }
 
-    const attempts = await this.redis.incr(attemptsKey(phone));
+    const attempts = await this.redis.incr(attemptsKey(identifier));
     if (attempts === 1) {
-      await this.redis.expire(attemptsKey(phone), CODE_TTL_SECONDS);
+      await this.redis.expire(attemptsKey(identifier), CODE_TTL_SECONDS);
     }
     if (attempts > MAX_VERIFY_ATTEMPTS) {
       // Burn the code so a brute-forcer can't keep guessing — they have
       // to request a new one and pay the send rate-limit cost.
-      await this.redis.del(codeKey(phone));
+      await this.redis.del(codeKey(identifier));
       throw new AppException(
         ErrorCode.AUTH_OTP_RATE_LIMITED,
         'Too many incorrect attempts. Request a new code.',
@@ -86,8 +89,8 @@ export class OtpService {
     }
 
     // Successful verification consumes the code so it can't be replayed.
-    await this.redis.del(codeKey(phone));
-    await this.redis.del(attemptsKey(phone));
+    await this.redis.del(codeKey(identifier));
+    await this.redis.del(attemptsKey(identifier));
   }
 
   private generateCode(): string {

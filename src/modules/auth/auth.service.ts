@@ -32,6 +32,8 @@ const TIMING_STUB_HASH = '$2b$12$ulqYa2DR4dOnMNiiJBVUZu6Uyj/VlU4nA2vOZFMiInf0W54
 
 const isLikelyPhone = (input: string): boolean => /[+0-9]/.test(input.charAt(0));
 
+const normaliseEmail = (raw: string): string => raw.trim().toLowerCase();
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -48,15 +50,15 @@ export class AuthService {
 
   // ─── OTP ────────────────────────────────────────────────────────────
 
-  async requestOtp(rawPhone: string): Promise<{ expiresInSeconds: number; devCode?: string }> {
-    const phone = normalisePhone(rawPhone);
-    return this.otp.request(phone);
+  async requestOtp(rawEmail: string): Promise<{ expiresInSeconds: number; devCode?: string }> {
+    const email = normaliseEmail(rawEmail);
+    return this.otp.request(email);
   }
 
-  async verifyOtp(rawPhone: string, code: string): Promise<{ signupToken: string }> {
-    const phone = normalisePhone(rawPhone);
-    await this.otp.verify(phone, code);
-    return { signupToken: this.jwt.signSignup(phone) };
+  async verifyOtp(rawEmail: string, code: string): Promise<{ signupToken: string }> {
+    const email = normaliseEmail(rawEmail);
+    await this.otp.verify(email, code);
+    return { signupToken: this.jwt.signSignup(email) };
   }
 
   // ─── Signup ─────────────────────────────────────────────────────────
@@ -65,24 +67,38 @@ export class AuthService {
     signupToken: string;
     firstName: string;
     lastName: string;
-    email: string;
+    phone: string;
     password: string;
     goal?: UserGoal;
   }): Promise<AuthResult> {
-    let phone: string;
+    let email: string;
     try {
-      phone = this.jwt.verifySignup(input.signupToken).sub;
+      email = this.jwt.verifySignup(input.signupToken).sub;
     } catch {
       throw new AppException(ErrorCode.AUTH_UNAUTHORIZED, 'Signup token is invalid or expired');
+    }
+
+    // Phone is now collected from the body (post-OTP, on the profile screen).
+    // Normalise here so both the unique check and the row write use the
+    // canonical E.164 form. Invalid input surfaces as VALIDATION_ERROR.
+    let phone: string;
+    try {
+      phone = normalisePhone(input.phone);
+    } catch (err) {
+      throw new AppException(
+        ErrorCode.VALIDATION_ERROR,
+        err instanceof Error ? err.message : 'Phone number is not valid',
+      );
     }
 
     const passwordHash = await this.password.hash(input.password);
 
     const user = await this.prisma.$transaction(async (tx) => {
-      // Pre-check by email — phone is already trusted via the signup token
-      // and unique-violations on it here would mean the token was minted
-      // for a phone that already has an account.
-      const existingByEmail = await tx.user.findUnique({ where: { email: input.email } });
+      // Pre-check both fields. Email is already trusted via the signup token,
+      // but a unique violation on it here would mean someone signed up the
+      // same address through a parallel OAuth flow between OTP-verify and
+      // signup — surface that as AUTH_EMAIL_IN_USE rather than a Prisma error.
+      const existingByEmail = await tx.user.findUnique({ where: { email } });
       if (existingByEmail) {
         throw new AppException(ErrorCode.AUTH_EMAIL_IN_USE, 'Email is already registered');
       }
@@ -95,7 +111,7 @@ export class AuthService {
         data: {
           firstName: input.firstName,
           lastName: input.lastName,
-          email: input.email,
+          email,
           phone,
           passwordHash,
           goal: input.goal ?? UserGoal.BUY,

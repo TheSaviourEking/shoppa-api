@@ -118,18 +118,18 @@ describe('AuthService', () => {
   // ─── OTP → signup token ────────────────────────────────────────────
 
   describe('OTP request and verify', () => {
-    it('round-trips request → verify → signupToken whose sub is the E.164 phone', async () => {
-      const { devCode } = await service.requestOtp('08012345678');
-      const { signupToken } = await service.verifyOtp('08012345678', devCode!);
+    it('round-trips request → verify → signupToken whose sub is the normalised email', async () => {
+      const { devCode } = await service.requestOtp('Aidanma@Example.com');
+      const { signupToken } = await service.verifyOtp('aidanma@example.com', devCode!);
 
       const decoded = jwt.verifySignup(signupToken);
-      expect(decoded.sub).toBe('+2348012345678');
+      expect(decoded.sub).toBe('aidanma@example.com');
       expect(decoded.type).toBe('signup');
     });
 
     it('rejects an incorrect OTP without issuing a signup token', async () => {
-      await service.requestOtp('08012345678');
-      await expect(service.verifyOtp('08012345678', '000000')).rejects.toMatchObject({
+      await service.requestOtp('aidanma@example.com');
+      await expect(service.verifyOtp('aidanma@example.com', '000000')).rejects.toMatchObject({
         code: ErrorCode.AUTH_INVALID_OTP,
       });
     });
@@ -141,12 +141,12 @@ describe('AuthService', () => {
     const baseInput = {
       firstName: 'Aidanma',
       lastName: 'Toluwalope',
-      email: 'aidanma@example.com',
+      phone: '08012345678',
       password: 'hunter2hunter2',
       goal: UserGoal.BUY,
     };
 
-    const tokenFor = (phone: string): string => jwt.signSignup(phone);
+    const tokenFor = (email: string): string => jwt.signSignup(email);
 
     it('creates a user and wallet and returns access + refresh tokens', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
@@ -154,7 +154,7 @@ describe('AuthService', () => {
       prisma.user.create.mockResolvedValue(created);
       prisma.refreshToken.create.mockResolvedValue(buildRow({ id: 'row-new' }));
 
-      const signupToken = tokenFor('+2348012345678');
+      const signupToken = tokenFor('aidanma@example.com');
       const result = await service.signup({ signupToken, ...baseInput });
 
       expect(result.user.email).toBe('aidanma@example.com');
@@ -163,6 +163,7 @@ describe('AuthService', () => {
       expect(prisma.user.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
+            email: 'aidanma@example.com',
             phone: '+2348012345678',
             wallet: {
               create: expect.objectContaining({ virtualAccountNumber: expect.any(String) }),
@@ -182,11 +183,19 @@ describe('AuthService', () => {
       expect(prisma.user.create).not.toHaveBeenCalled();
     });
 
+    it('rejects when the phone fails libphonenumber normalisation', async () => {
+      const signupToken = tokenFor('aidanma@example.com');
+      await expect(
+        service.signup({ ...baseInput, signupToken, phone: 'not-a-phone' }),
+      ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR });
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
     it('rejects when the email is already in use and creates no user', async () => {
       prisma.user.findUnique.mockImplementation(({ where }) =>
         Promise.resolve(where.email === 'aidanma@example.com' ? buildUser() : null),
       );
-      const signupToken = tokenFor('+2348099999999');
+      const signupToken = tokenFor('aidanma@example.com');
 
       await expect(service.signup({ signupToken, ...baseInput })).rejects.toMatchObject({
         code: ErrorCode.AUTH_EMAIL_IN_USE,
@@ -199,7 +208,7 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockImplementation(({ where }) =>
         Promise.resolve(where.phone === '+2348012345678' ? buildUser() : null),
       );
-      const signupToken = tokenFor('+2348012345678');
+      const signupToken = tokenFor('newuser@example.com');
 
       await expect(service.signup({ signupToken, ...baseInput })).rejects.toMatchObject({
         code: ErrorCode.AUTH_PHONE_IN_USE,

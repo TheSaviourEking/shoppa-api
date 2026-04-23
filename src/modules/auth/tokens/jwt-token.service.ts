@@ -36,8 +36,8 @@ export interface RefreshTokenPayload {
 
 /**
  * Short-lived token issued after a successful OTP verify. Carries the
- * verified phone in `sub` so the signup endpoint can pair the new
- * account with the proven number without trusting the body.
+ * verified email in `sub` so the signup endpoint can pair the new
+ * account with the proven address without trusting the body.
  */
 export interface SignupTokenPayload {
   sub: string;
@@ -89,8 +89,8 @@ export class JwtTokenService {
     return decoded;
   }
 
-  signSignup(verifiedPhone: string): string {
-    const payload: SignupTokenPayload = { sub: verifiedPhone, type: 'signup' };
+  signSignup(verifiedEmail: string): string {
+    const payload: SignupTokenPayload = { sub: verifiedEmail, type: 'signup' };
     // Reuses the access secret — signup tokens are short-lived and
     // single-purpose, so they don't need a separate key.
     return this.jwt.sign(payload, {

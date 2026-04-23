@@ -38,14 +38,14 @@ describe('AuthController', () => {
     );
   });
 
-  it('requestOtp extracts phone', async () => {
-    await controller.requestOtp({ phone: '+2348012345678' });
-    expect(auth.requestOtp).toHaveBeenCalledWith('+2348012345678');
+  it('requestOtp extracts email', async () => {
+    await controller.requestOtp({ email: 'aidanma@example.com' });
+    expect(auth.requestOtp).toHaveBeenCalledWith('aidanma@example.com');
   });
 
-  it('verifyOtp extracts phone + code', async () => {
-    await controller.verifyOtp({ phone: '+2348012345678', code: '123456' });
-    expect(auth.verifyOtp).toHaveBeenCalledWith('+2348012345678', '123456');
+  it('verifyOtp extracts email + code', async () => {
+    await controller.verifyOtp({ email: 'aidanma@example.com', code: '123456' });
+    expect(auth.verifyOtp).toHaveBeenCalledWith('aidanma@example.com', '123456');
   });
 
   it('signup forwards the whole body', async () => {

@@ -9,7 +9,7 @@ class StubConfig {
   isProduction = false;
 }
 
-const PHONE = '+2348012345678';
+const ID = 'aidanma@example.com';
 
 const expectAppException = async (fn: () => Promise<unknown>, code: ErrorCode): Promise<void> => {
   try {
@@ -35,57 +35,54 @@ describe('OtpService', () => {
 
   describe('request', () => {
     it('returns a 6-digit dev code in non-production', async () => {
-      const result = await service.request(PHONE);
+      const result = await service.request(ID);
       expect(result.devCode).toMatch(/^\d{6}$/);
       expect(result.expiresInSeconds).toBe(600);
     });
 
-    it('rate-limits more than 3 sends per phone', async () => {
-      await service.request(PHONE);
-      await service.request(PHONE);
-      await service.request(PHONE);
-      await expectAppException(() => service.request(PHONE), ErrorCode.AUTH_OTP_RATE_LIMITED);
+    it('rate-limits more than 3 sends per identifier', async () => {
+      await service.request(ID);
+      await service.request(ID);
+      await service.request(ID);
+      await expectAppException(() => service.request(ID), ErrorCode.AUTH_OTP_RATE_LIMITED);
     });
 
     it('clears prior attempt counters when a new code is requested', async () => {
-      await service.request(PHONE);
-      await expectAppException(() => service.verify(PHONE, '000000'), ErrorCode.AUTH_INVALID_OTP);
+      await service.request(ID);
+      await expectAppException(() => service.verify(ID, '000000'), ErrorCode.AUTH_INVALID_OTP);
 
-      const second = await service.request(PHONE);
-      await expect(service.verify(PHONE, second.devCode!)).resolves.toBeUndefined();
+      const second = await service.request(ID);
+      await expect(service.verify(ID, second.devCode!)).resolves.toBeUndefined();
     });
   });
 
   describe('verify', () => {
     it('accepts the correct code and consumes it (single use)', async () => {
-      const { devCode } = await service.request(PHONE);
+      const { devCode } = await service.request(ID);
 
-      await expect(service.verify(PHONE, devCode!)).resolves.toBeUndefined();
-      await expectAppException(() => service.verify(PHONE, devCode!), ErrorCode.AUTH_OTP_EXPIRED);
+      await expect(service.verify(ID, devCode!)).resolves.toBeUndefined();
+      await expectAppException(() => service.verify(ID, devCode!), ErrorCode.AUTH_OTP_EXPIRED);
     });
 
     it('rejects an incorrect code with AUTH_INVALID_OTP', async () => {
-      await service.request(PHONE);
-      await expectAppException(() => service.verify(PHONE, '999999'), ErrorCode.AUTH_INVALID_OTP);
+      await service.request(ID);
+      await expectAppException(() => service.verify(ID, '999999'), ErrorCode.AUTH_INVALID_OTP);
     });
 
     it('returns AUTH_OTP_EXPIRED when no code was requested', async () => {
-      await expectAppException(() => service.verify(PHONE, '123456'), ErrorCode.AUTH_OTP_EXPIRED);
+      await expectAppException(() => service.verify(ID, '123456'), ErrorCode.AUTH_OTP_EXPIRED);
     });
 
     it('locks out after 5 wrong attempts and burns the code', async () => {
-      const { devCode } = await service.request(PHONE);
+      const { devCode } = await service.request(ID);
 
       for (let i = 0; i < 5; i += 1) {
-        await expectAppException(() => service.verify(PHONE, '000000'), ErrorCode.AUTH_INVALID_OTP);
+        await expectAppException(() => service.verify(ID, '000000'), ErrorCode.AUTH_INVALID_OTP);
       }
 
-      await expectAppException(
-        () => service.verify(PHONE, devCode!),
-        ErrorCode.AUTH_OTP_RATE_LIMITED,
-      );
+      await expectAppException(() => service.verify(ID, devCode!), ErrorCode.AUTH_OTP_RATE_LIMITED);
 
-      await expectAppException(() => service.verify(PHONE, devCode!), ErrorCode.AUTH_OTP_EXPIRED);
+      await expectAppException(() => service.verify(ID, devCode!), ErrorCode.AUTH_OTP_EXPIRED);
     });
   });
 });

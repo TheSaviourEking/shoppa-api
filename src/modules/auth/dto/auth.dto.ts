@@ -12,17 +12,15 @@ import {
 import { UserGoal } from '@prisma/client';
 
 export class OtpRequestDto {
-  @ApiProperty({ example: '08012345678' })
-  @IsString()
-  @IsNotEmpty()
-  phone!: string;
+  @ApiProperty({ example: 'aidanma@example.com' })
+  @IsEmail()
+  email!: string;
 }
 
 export class OtpVerifyDto {
-  @ApiProperty({ example: '08012345678' })
-  @IsString()
-  @IsNotEmpty()
-  phone!: string;
+  @ApiProperty({ example: 'aidanma@example.com' })
+  @IsEmail()
+  email!: string;
 
   @ApiProperty({ example: '123456' })
   @IsString()
@@ -47,9 +45,13 @@ export class SignupDto {
   @Length(1, 100)
   lastName!: string;
 
-  @ApiProperty({ example: 'aidanma@example.com' })
-  @IsEmail()
-  email!: string;
+  @ApiProperty({
+    example: '08012345678',
+    description: 'Phone in local or E.164 form; backend normalises',
+  })
+  @IsString()
+  @IsNotEmpty()
+  phone!: string;
 
   @ApiProperty({ example: 'hunter2hunter2', minLength: 8 })
   @IsString()
