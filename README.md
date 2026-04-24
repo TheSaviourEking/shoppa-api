@@ -59,7 +59,7 @@ cp .env.example .env
 # Generate two strong JWT secrets and put them in .env:
 node -e "const c=require('crypto');console.log('JWT_ACCESS_SECRET='+c.randomBytes(48).toString('hex'));console.log('JWT_REFRESH_SECRET='+c.randomBytes(48).toString('hex'));"
 
-# 4. Apply migrations + seed categories
+# 4. Apply migrations + seed categories, demo users, and sample conversations
 npm run prisma:migrate:deploy
 npm run db:seed
 
@@ -76,6 +76,35 @@ The server listens on **`http://localhost:3000`**:
 Uploaded files are served by **MinIO directly** at
 `http://localhost:9000/shoppa-uploads/<key>`. The MinIO console is at
 `http://localhost:9001` (login: `minioadmin` / `minioadmin`).
+
+### Seeded demo accounts
+
+The seed script creates three Page-3 demo accounts so reviewers can log in
+and immediately see populated screens — list state, conversation thread,
+paid + cancelled header variants — without having to drive the
+shopper-side initiation flow that lives outside Page 3 (see
+[Conversation initiation flow](#conversation-initiation-flow-known-gap)
+below).
+
+| Role        | Email                  | Phone           | Password        |
+| ----------- | ---------------------- | --------------- | --------------- |
+| Buyer       | `aidanma@shoppa.dev`   | `+2348012345678` | `shoppa1234`    |
+| Shopper A   | `adamu@shoppa.dev`     | `+2348023456789` | `shoppa1234`    |
+| Shopper B   | `tolu@shoppa.dev`      | `+2348034567890` | `shoppa1234`    |
+
+The buyer (`aidanma@shoppa.dev`) gets:
+
+- A `₦750,000` wallet balance.
+- Three posts — one POSTED (Grocery, ₦500k), one PAID (Electronics,
+  ₦260,460), one CANCELLED (Home Appliances, ₦80k) — to drive the three
+  conversation header variants.
+- Four sample conversations across those posts, with a mix of text and
+  4-image-grid messages, mixed read/unread to drive the unread dot on the
+  list screen.
+
+Re-running `npm run db:seed` is idempotent — the script skips users,
+posts, conversations, and uploads that already exist by their natural
+keys.
 
 A first smoke test once running:
 
@@ -445,6 +474,34 @@ replaced with production-credible integrations:
   dev and prod — MinIO via docker-compose locally, Cloudflare R2 (or
   any equivalent) in prod. See
   [Production object storage setup](#production-object-storage-setup).
+
+### Conversation initiation flow (known gap)
+
+Conversations are created via `POST /api/v1/conversations` with a
+`postId` + `counterpartyId`. The endpoint is fully implemented and
+covered by tests; the call site that produces the `counterpartyId` —
+i.e. the "browse posts → message the buyer" UI a shopper would tap to
+*start* a chat — lives in **Page 1 / Page 2 of the figma**, which are
+owned by the other two engineers on the assessment.
+
+Page 3 (this work) implements:
+
+- Conversation **list** with avatars, last-message preview, unread dot.
+- Conversation **thread** with text + image grids, read receipts, header
+  state variants (default / paid / cancelled), composer, photo picker,
+  action sheet, and the block-messages flow.
+
+To exercise the populated state without the shopper-initiation UI, the
+`db:seed` script pre-creates four sample conversations against the
+buyer's three posts (see [Seeded demo accounts](#seeded-demo-accounts)).
+Reviewers log in as the buyer and see the list and thread populated
+end-to-end on first launch.
+
+In a single-page-3-only review build, the equivalent of "+ New Chat"
+would be implemented as a small dev affordance on the messages screen
+that lists the user's posts and a known set of test counterparties — but
+that's a non-feature for the assessment because it isn't in the figma.
+The seed pre-population is the cleaner demo path.
 
 ### Genuine stubs (need paid third-party services)
 
