@@ -28,14 +28,15 @@ const backoffSeconds = (sendNumber: number): number =>
   Math.min(RESEND_BASE_SECONDS * 2 ** Math.max(0, sendNumber - 1), RESEND_MAX_SECONDS);
 
 export interface OtpRequestResult {
+  /**
+   * The generated code — always returned so the caller can hand it to the
+   * email queue. Service-internal; AuthService strips this from any
+   * HTTP response unless we're in dev mode.
+   */
+  code: string;
   expiresInSeconds: number;
   /** Seconds the client must wait before another OTP can be requested. */
   retryAfterSeconds: number;
-  /**
-   * In non-production environments the generated code is returned so
-   * the dev loop doesn't need a real email provider. Production omits this.
-   */
-  devCode?: string;
 }
 
 @Injectable()
@@ -71,13 +72,16 @@ export class OtpService {
     await this.redis.del(attemptsKey(identifier));
 
     if (!this.config.isProduction) {
+      // Keep the console line in dev even when we also send the email —
+      // reviewers and CI runs shouldn't need a mailbox to progress through
+      // the flow. Production omits this to avoid leaking OTPs in logs.
       this.logger.log(`OTP for ${identifier}: ${code} (dev mode)`);
     }
 
     return {
+      code,
       expiresInSeconds: CODE_TTL_SECONDS,
       retryAfterSeconds: retryAfter,
-      ...(this.config.isProduction ? {} : { devCode: code }),
     };
   }
 

@@ -6,6 +6,7 @@ import { ErrorCode } from '../../common/exceptions/error-codes';
 import { type PublicUser, toPublicUser } from '../../common/serializers/public-user';
 import { AppConfigService } from '../../config/config.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmailQueue } from '../email/email.queue';
 import { PasswordService } from './credentials/password.service';
 import { normalisePhone } from './credentials/phone.util';
 import type { OAuthIdentity } from './oauth/oauth.types';
@@ -34,6 +35,8 @@ const isLikelyPhone = (input: string): boolean => /[+0-9]/.test(input.charAt(0))
 
 const normaliseEmail = (raw: string): string => raw.trim().toLowerCase();
 
+const OTP_TTL_MINUTES = 10;
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -42,6 +45,7 @@ export class AuthService {
     private readonly otp: OtpService,
     private readonly jwt: JwtTokenService,
     private readonly config: AppConfigService,
+    private readonly emailQueue: EmailQueue,
   ) {}
 
   private stripSensitive(user: User): PublicUser {
@@ -50,9 +54,27 @@ export class AuthService {
 
   // ─── OTP ────────────────────────────────────────────────────────────
 
-  async requestOtp(rawEmail: string): Promise<{ expiresInSeconds: number; devCode?: string }> {
+  async requestOtp(
+    rawEmail: string,
+  ): Promise<{ expiresInSeconds: number; retryAfterSeconds: number; devCode?: string }> {
     const email = normaliseEmail(rawEmail);
-    return this.otp.request(email);
+    const { code, expiresInSeconds, retryAfterSeconds } = await this.otp.request(email);
+
+    // Fire the email through the queue. Dev mode keeps the console log in
+    // OtpService so reviewers without a mailbox still see the code, and
+    // the worker either sends via Resend (if RESEND_API_KEY is set) or
+    // logs the rendered body (if it isn't).
+    await this.emailQueue.enqueue({
+      kind: 'otp',
+      to: email,
+      data: { code, ttlMinutes: OTP_TTL_MINUTES },
+    });
+
+    return {
+      expiresInSeconds,
+      retryAfterSeconds,
+      ...(this.config.isProduction ? {} : { devCode: code }),
+    };
   }
 
   async verifyOtp(rawEmail: string, code: string): Promise<{ signupToken: string }> {

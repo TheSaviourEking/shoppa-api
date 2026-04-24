@@ -95,6 +95,7 @@ describe('AuthService', () => {
   let password: PasswordService;
   let jwt: JwtTokenService;
   let otp: OtpService;
+  let emailQueue: { enqueue: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -111,8 +112,17 @@ describe('AuthService', () => {
     password = new PasswordService();
     jwt = new JwtTokenService(new JwtService({}), config);
     otp = new OtpService(redis, config);
+    emailQueue = { enqueue: jest.fn().mockResolvedValue(undefined) };
 
-    service = new AuthService(prisma as unknown as PrismaService, password, otp, jwt, config);
+    service = new AuthService(
+      prisma as unknown as PrismaService,
+      password,
+      otp,
+      jwt,
+      config,
+
+      emailQueue as never,
+    );
   });
 
   // ─── OTP → signup token ────────────────────────────────────────────

@@ -37,7 +37,7 @@ describe('OtpService', () => {
   describe('request', () => {
     it('returns a 6-digit dev code + expiry + initial 25s retry-after', async () => {
       const result = await service.request(ID);
-      expect(result.devCode).toMatch(/^\d{6}$/);
+      expect(result.code).toMatch(/^\d{6}$/);
       expect(result.expiresInSeconds).toBe(600);
       expect(result.retryAfterSeconds).toBe(25);
     });
@@ -86,16 +86,16 @@ describe('OtpService', () => {
 
       await redis.del(COOLDOWN_KEY);
       const second = await service.request(ID);
-      await expect(service.verify(ID, second.devCode!)).resolves.toBeUndefined();
+      await expect(service.verify(ID, second.code)).resolves.toBeUndefined();
     });
   });
 
   describe('verify', () => {
     it('accepts the correct code and consumes it (single use)', async () => {
-      const { devCode } = await service.request(ID);
+      const { code } = await service.request(ID);
 
-      await expect(service.verify(ID, devCode!)).resolves.toBeUndefined();
-      await expectAppException(() => service.verify(ID, devCode!), ErrorCode.AUTH_OTP_EXPIRED);
+      await expect(service.verify(ID, code)).resolves.toBeUndefined();
+      await expectAppException(() => service.verify(ID, code), ErrorCode.AUTH_OTP_EXPIRED);
     });
 
     it('rejects an incorrect code with AUTH_INVALID_OTP', async () => {
@@ -108,15 +108,15 @@ describe('OtpService', () => {
     });
 
     it('locks out after 5 wrong attempts and burns the code', async () => {
-      const { devCode } = await service.request(ID);
+      const { code } = await service.request(ID);
 
       for (let i = 0; i < 5; i += 1) {
         await expectAppException(() => service.verify(ID, '000000'), ErrorCode.AUTH_INVALID_OTP);
       }
 
-      await expectAppException(() => service.verify(ID, devCode!), ErrorCode.AUTH_OTP_RATE_LIMITED);
+      await expectAppException(() => service.verify(ID, code), ErrorCode.AUTH_OTP_RATE_LIMITED);
 
-      await expectAppException(() => service.verify(ID, devCode!), ErrorCode.AUTH_OTP_EXPIRED);
+      await expectAppException(() => service.verify(ID, code), ErrorCode.AUTH_OTP_EXPIRED);
     });
   });
 });

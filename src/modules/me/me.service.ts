@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Prisma, type User } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { AppException } from '../../common/exceptions/app.exception';
@@ -8,6 +8,7 @@ import { AppConfigService } from '../../config/config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PasswordService } from '../auth/credentials/password.service';
 import { normalisePhone } from '../auth/credentials/phone.util';
+import { EmailQueue } from '../email/email.queue';
 import type {
   ChangePasswordDto,
   ForgotPasswordDto,
@@ -17,15 +18,15 @@ import type {
 } from './dto/me.dto';
 
 const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000;
+const PASSWORD_RESET_TTL_MIN = Math.floor(PASSWORD_RESET_TTL_MS / 60_000);
 
 @Injectable()
 export class MeService {
-  private readonly logger = new Logger(MeService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly password: PasswordService,
     private readonly config: AppConfigService,
+    private readonly emailQueue: EmailQueue,
   ) {}
 
   private toPublic(user: User): PublicUser {
@@ -108,11 +109,19 @@ export class MeService {
       data: { userId: user.id, tokenHash, expiresAt },
     });
 
-    if (!this.config.isProduction) {
-      // Surfacing the token in the dev log avoids needing a real email
-      // provider for the assessment build.
-      this.logger.log(`Password reset token for user ${user.id}: ${rawToken}`);
-    }
+    // Enqueue — never block the request on the email send. If RESEND_API_KEY
+    // is unset, the worker logs the rendered email body instead (dev loop
+    // stays functional without real credentials).
+    const resetUrl = `${this.config.appPublicUrl}/auth/reset-password?token=${rawToken}`;
+    await this.emailQueue.enqueue({
+      kind: 'password-reset',
+      to: user.email,
+      data: {
+        firstName: user.firstName,
+        resetUrl,
+        ttlMinutes: PASSWORD_RESET_TTL_MIN,
+      },
+    });
   }
 
   async resetPassword(input: ResetPasswordDto): Promise<void> {

@@ -3,6 +3,7 @@ import { ErrorCode } from '../../common/exceptions/error-codes';
 import type { AppConfigService } from '../../config/config.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { PasswordService } from '../auth/credentials/password.service';
+import type { EmailQueue } from '../email/email.queue';
 import { MeService } from './me.service';
 
 interface PrismaMock {
@@ -10,6 +11,10 @@ interface PrismaMock {
   passwordReset: { create: jest.Mock; findMany: jest.Mock; update: jest.Mock };
   refreshToken: { updateMany: jest.Mock };
   $transaction: jest.Mock;
+}
+
+interface EmailQueueMock {
+  enqueue: jest.Mock;
 }
 
 const buildUser = (over: Partial<User> = {}): User => ({
@@ -30,8 +35,12 @@ const buildUser = (over: Partial<User> = {}): User => ({
 describe('MeService', () => {
   let prisma: PrismaMock;
   let password: PasswordService;
+  let emailQueue: EmailQueueMock;
   let service: MeService;
-  const config = { isProduction: false } as unknown as AppConfigService;
+  const config = {
+    isProduction: false,
+    appPublicUrl: 'http://localhost:3000',
+  } as unknown as AppConfigService;
 
   beforeEach(() => {
     prisma = {
@@ -44,7 +53,13 @@ describe('MeService', () => {
       fn(prisma),
     );
     password = new PasswordService();
-    service = new MeService(prisma as unknown as PrismaService, password, config);
+    emailQueue = { enqueue: jest.fn().mockResolvedValue(undefined) };
+    service = new MeService(
+      prisma as unknown as PrismaService,
+      password,
+      config,
+      emailQueue as unknown as EmailQueue,
+    );
   });
 
   describe('changePassword', () => {
@@ -92,18 +107,29 @@ describe('MeService', () => {
   });
 
   describe('requestPasswordReset', () => {
-    it('writes a reset row when the user exists', async () => {
+    it('writes a reset row and enqueues the password-reset email', async () => {
       prisma.user.findUnique.mockResolvedValue(buildUser());
       await service.requestPasswordReset({ identifier: 'aidanma@example.com' });
       expect(prisma.passwordReset.create).toHaveBeenCalled();
+      expect(emailQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'password-reset',
+          to: 'aidanma@example.com',
+          data: expect.objectContaining({
+            firstName: 'Aidanma',
+            resetUrl: expect.stringContaining('/auth/reset-password?token='),
+          }),
+        }),
+      );
     });
 
-    it('does NOT throw when the identifier is unknown (no enumeration)', async () => {
+    it('does NOT throw when the identifier is unknown (no enumeration), and sends no email', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
       await expect(
         service.requestPasswordReset({ identifier: 'nobody@example.com' }),
       ).resolves.toBeUndefined();
       expect(prisma.passwordReset.create).not.toHaveBeenCalled();
+      expect(emailQueue.enqueue).not.toHaveBeenCalled();
     });
   });
 
