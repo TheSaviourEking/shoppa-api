@@ -96,6 +96,22 @@ export class AppConfigService {
     return env.S3_FORCE_PATH_STYLE;
   }
 
+  get resendApiKey(): string | undefined {
+    return env.RESEND_API_KEY;
+  }
+
+  get resendFromEmail(): string {
+    return env.RESEND_FROM_EMAIL;
+  }
+
+  get appPublicUrl(): string {
+    return env.APP_PUBLIC_URL;
+  }
+
+  get devEmailRedirect(): string | undefined {
+    return env.DEV_EMAIL_REDIRECT;
+  }
+
   get isProduction(): boolean {
     return env.NODE_ENV === 'production';
   }

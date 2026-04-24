@@ -52,6 +52,20 @@ const envSchema = z
       .enum(['true', 'false'])
       .default('true')
       .transform((v) => v === 'true'),
+
+    // Email — Resend API key + sender address. Without RESEND_API_KEY the
+    // EmailService logs to the console instead of attempting a network call,
+    // which keeps the dev loop and the test suite from needing real
+    // credentials. With an empty key the queue still runs end-to-end.
+    RESEND_API_KEY: z.string().optional(),
+    RESEND_FROM_EMAIL: z.string().email().default('onboarding@resend.dev'),
+    APP_PUBLIC_URL: z.string().url().default('http://localhost:3000'),
+    // Dev-only safety net. When set, every outgoing email is redirected to
+    // this address instead of the one on the payload — useful while
+    // Resend's test-mode limits sends to the account owner's verified
+    // inbox. Ignored in production (NODE_ENV=production) so a stray value
+    // can't accidentally swallow real customer mail.
+    DEV_EMAIL_REDIRECT: z.string().email().optional(),
   })
   .superRefine((val, ctx) => {
     if (!val.OAUTH_DEV_MODE) {
