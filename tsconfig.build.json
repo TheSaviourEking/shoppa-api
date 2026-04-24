@@ -1,4 +1,12 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"]
+  "compilerOptions": {
+    "rootDir": "./src",
+    // Incremental cache lives inside dist so `rimraf dist` (the prebuild
+    // step) clears it automatically. Otherwise the cache makes tsc think
+    // the previous emit is still valid and skip writing output.
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "test", "dist", "prisma", "load", "**/*spec.ts"]
 }
