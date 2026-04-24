@@ -117,7 +117,7 @@ describe('MeService', () => {
           to: 'aidanma@example.com',
           data: expect.objectContaining({
             firstName: 'Aidanma',
-            resetUrl: expect.stringContaining('/auth/reset-password?token='),
+            resetUrl: expect.stringContaining('/reset-password?token='),
           }),
         }),
       );

@@ -112,7 +112,13 @@ export class MeService {
     // Enqueue — never block the request on the email send. If RESEND_API_KEY
     // is unset, the worker logs the rendered email body instead (dev loop
     // stays functional without real credentials).
-    const resetUrl = `${this.config.appPublicUrl}/auth/reset-password?token=${rawToken}`;
+    //
+    // The URL concatenation handles both web-style bases (http://host) and
+    // custom schemes (shoppa://). Both the production build's `shoppa://`
+    // deep link and a web-form landing page at `http://host/reset-password`
+    // route to the same reset-password route.
+    const base = this.config.appPublicUrl;
+    const resetUrl = `${base}${base.endsWith('/') ? '' : '/'}reset-password?token=${rawToken}`;
     await this.emailQueue.enqueue({
       kind: 'password-reset',
       to: user.email,

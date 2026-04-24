@@ -59,7 +59,11 @@ const envSchema = z
     // credentials. With an empty key the queue still runs end-to-end.
     RESEND_API_KEY: z.string().optional(),
     RESEND_FROM_EMAIL: z.string().email().default('onboarding@resend.dev'),
-    APP_PUBLIC_URL: z.string().url().default('http://localhost:3000'),
+    // Base for user-facing links we embed in emails (password-reset links,
+    // etc). Should be the value that opens the Shoppa app on the user's
+    // device. Default is the production-build custom scheme; override per
+    // environment as needed (see .env.example).
+    APP_PUBLIC_URL: z.string().default('shoppa://'),
     // Dev-only safety net. When set, every outgoing email is redirected to
     // this address instead of the one on the payload — useful while
     // Resend's test-mode limits sends to the account owner's verified
