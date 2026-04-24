@@ -81,11 +81,22 @@ export class WalletService {
         throw new AppException(ErrorCode.POST_NOT_ELIGIBLE, 'Post is cancelled');
       }
 
-      const wallet = await tx.wallet.findUnique({ where: { userId: buyerId } });
+      // SELECT FOR UPDATE the wallet row inside the transaction so two
+      // concurrent payForPost calls against the same wallet serialise on
+      // the row lock instead of racing the balance check. Without this,
+      // both transactions could read a balance ≥ budget, both decrement,
+      // and one ends up with a negative balance.
+      const lockedRows = await tx.$queryRaw<Wallet[]>(
+        Prisma.sql`SELECT * FROM "wallets" WHERE "userId" = ${buyerId} FOR UPDATE`,
+      );
+      const wallet = lockedRows[0];
       if (!wallet) {
         throw new AppException(ErrorCode.NOT_FOUND, 'Wallet not found');
       }
-      if (wallet.balance.lessThan(post.budget)) {
+      // The raw Postgres driver returns Decimal as a string — coerce so
+      // the comparison + downstream Decimal math works.
+      const balance = new Prisma.Decimal(wallet.balance);
+      if (balance.lessThan(post.budget)) {
         throw new AppException(ErrorCode.WALLET_INSUFFICIENT_FUNDS, 'Insufficient wallet balance');
       }
 

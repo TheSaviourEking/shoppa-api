@@ -14,6 +14,11 @@ interface PrismaMock {
   transaction: { create: jest.Mock; findMany: jest.Mock };
   post: { findUnique: jest.Mock; update: jest.Mock };
   $transaction: jest.Mock;
+  // payForPost takes a row-level lock on the wallet via SELECT ... FOR UPDATE,
+  // which has to go through $queryRaw (Prisma's typed API doesn't expose
+  // pessimistic locks). Mock returns the same wallet row(s) the rest of the
+  // service expects to find.
+  $queryRaw: jest.Mock;
 }
 
 const buildWallet = (over: Partial<Wallet> = {}): Wallet => ({
@@ -36,6 +41,7 @@ describe('WalletService', () => {
       transaction: { create: jest.fn(), findMany: jest.fn() },
       post: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
       $transaction: jest.fn(),
+      $queryRaw: jest.fn(),
     };
     prisma.$transaction.mockImplementation((fn: (tx: PrismaMock) => Promise<unknown>) =>
       fn(prisma),
@@ -99,7 +105,7 @@ describe('WalletService', () => {
 
     it('debits the wallet, marks the post PAID, and writes a Transaction in one $transaction', async () => {
       prisma.post.findUnique.mockResolvedValue(postFixture);
-      prisma.wallet.findUnique.mockResolvedValue(buildWallet());
+      prisma.$queryRaw.mockResolvedValue([buildWallet()]);
       prisma.transaction.create.mockResolvedValue({ id: 'tx-1' });
 
       await service.payForPost('user-1', 'post-1');
@@ -125,7 +131,7 @@ describe('WalletService', () => {
 
     it('rejects when the wallet has insufficient funds (no debit, no status change)', async () => {
       prisma.post.findUnique.mockResolvedValue(postFixture);
-      prisma.wallet.findUnique.mockResolvedValue(buildWallet({ balance: new Prisma.Decimal(100) }));
+      prisma.$queryRaw.mockResolvedValue([buildWallet({ balance: new Prisma.Decimal(100) })]);
 
       await expect(service.payForPost('user-1', 'post-1')).rejects.toMatchObject({
         code: ErrorCode.WALLET_INSUFFICIENT_FUNDS,
@@ -159,13 +165,29 @@ describe('WalletService', () => {
 
     it('rolls back debit and status change when the transaction insert fails', async () => {
       prisma.post.findUnique.mockResolvedValue(postFixture);
-      prisma.wallet.findUnique.mockResolvedValue(buildWallet());
+      prisma.$queryRaw.mockResolvedValue([buildWallet()]);
       prisma.transaction.create.mockRejectedValue(new Error('boom'));
 
       await expect(service.payForPost('user-1', 'post-1')).rejects.toThrow('boom');
       // All three writes ran inside the same $transaction call so the
       // ROLLBACK at the DB layer reverts them as a unit.
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('serialises concurrent payments by acquiring a row-level lock', async () => {
+      // The $queryRaw call inside $transaction is what holds the FOR UPDATE
+      // lock at the database; this asserts the service actually issues it
+      // (not just findUnique) before doing the balance check + decrement.
+      prisma.post.findUnique.mockResolvedValue(postFixture);
+      prisma.$queryRaw.mockResolvedValue([buildWallet()]);
+      prisma.transaction.create.mockResolvedValue({ id: 'tx-1' });
+
+      await service.payForPost('user-1', 'post-1');
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      // findUnique on the wallet must NOT be used in payForPost — that
+      // would skip the lock and reintroduce the TOCTOU race.
+      expect(prisma.wallet.findUnique).not.toHaveBeenCalled();
     });
   });
 });
