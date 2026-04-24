@@ -10,6 +10,7 @@ class StubConfig {
 }
 
 const ID = 'aidanma@example.com';
+const COOLDOWN_KEY = `otp:cooldown:${ID}`;
 
 const expectAppException = async (fn: () => Promise<unknown>, code: ErrorCode): Promise<void> => {
   try {
@@ -34,23 +35,56 @@ describe('OtpService', () => {
   });
 
   describe('request', () => {
-    it('returns a 6-digit dev code in non-production', async () => {
+    it('returns a 6-digit dev code + expiry + initial 25s retry-after', async () => {
       const result = await service.request(ID);
       expect(result.devCode).toMatch(/^\d{6}$/);
       expect(result.expiresInSeconds).toBe(600);
+      expect(result.retryAfterSeconds).toBe(25);
     });
 
-    it('rate-limits more than 3 sends per identifier', async () => {
+    it('blocks an immediate second send while the cooldown is active', async () => {
       await service.request(ID);
-      await service.request(ID);
-      await service.request(ID);
-      await expectAppException(() => service.request(ID), ErrorCode.AUTH_OTP_RATE_LIMITED);
+      try {
+        await service.request(ID);
+        fail('expected cooldown to block the second send');
+      } catch (err) {
+        expect(err).toBeInstanceOf(AppException);
+        expect((err as AppException).code).toBe(ErrorCode.AUTH_OTP_RATE_LIMITED);
+        expect((err as AppException).details).toMatchObject({
+          retryAfterSeconds: expect.any(Number),
+        });
+      }
+    });
+
+    it('doubles retry-after on each subsequent send (25 → 50 → 100)', async () => {
+      const first = await service.request(ID);
+      expect(first.retryAfterSeconds).toBe(25);
+
+      // Simulate the cooldown elapsing.
+      await redis.del(COOLDOWN_KEY);
+      const second = await service.request(ID);
+      expect(second.retryAfterSeconds).toBe(50);
+
+      await redis.del(COOLDOWN_KEY);
+      const third = await service.request(ID);
+      expect(third.retryAfterSeconds).toBe(100);
+    });
+
+    it('caps retry-after at 30 minutes no matter how many sends pile up', async () => {
+      for (let i = 0; i < 10; i += 1) {
+        await redis.del(COOLDOWN_KEY);
+        await service.request(ID);
+      }
+      await redis.del(COOLDOWN_KEY);
+      const nth = await service.request(ID);
+      expect(nth.retryAfterSeconds).toBe(30 * 60);
     });
 
     it('clears prior attempt counters when a new code is requested', async () => {
       await service.request(ID);
       await expectAppException(() => service.verify(ID, '000000'), ErrorCode.AUTH_INVALID_OTP);
 
+      await redis.del(COOLDOWN_KEY);
       const second = await service.request(ID);
       await expect(service.verify(ID, second.devCode!)).resolves.toBeUndefined();
     });
